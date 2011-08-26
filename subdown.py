@@ -92,7 +92,7 @@ if __name__ == '__main__':
         if subreddits[0] == '--help':
             raise UsageError()
     except (IndexError, UsageError):
-        print "Usage: subdown.py <subreddit,subreddit> <pages>"
+        print "Usage: subdown.py <subreddit[,subreddit]> [pages]"
         exit()
 
     try:
