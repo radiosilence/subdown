@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # Reddit pics downloader
 from requests import get
 from json import loads
