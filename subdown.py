@@ -1,6 +1,5 @@
 #!/usr/bin/python
 # Reddit pics downloader
-import thread
 import threading
 from requests import get
 from json import loads
@@ -8,6 +7,7 @@ from os.path import exists
 from os import mkdir
 import re
 import sys
+
 
 class UsageError(Exception):
     pass
@@ -61,6 +61,7 @@ def spider(subreddit, pages):
     for url in urls:
         threading.Thread(target=download_file, args=(url, subreddit)).start()
 
+
 def download_file(url, subreddit):
     file_name = url.split('/')[-1]
 
@@ -76,8 +77,11 @@ def download_file(url, subreddit):
 
         r = get(url)
         f = open(file_name, 'wb')
-        print 'Downloading %s, file-size: %2.2fKB' % \
-            (url, float(r.headers['content-length']) / 1000)
+        try:
+            print 'Downloading %s, file-size: %2.2fKB' % \
+                (url, float(r.headers['content-length']) / 1000)
+        except TypeError:
+            print "Downloading %s, file-size: Unknown" % url
         f.write(r.content)
         f.close()
     except IndexError:
