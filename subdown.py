@@ -1,12 +1,13 @@
 #!/usr/bin/python
 # Reddit pics downloader
+import thread
+import threading
 from requests import get
 from json import loads
 from os.path import exists
 from os import mkdir
 import re
 import sys
-
 
 class UsageError(Exception):
     pass
@@ -44,20 +45,35 @@ def get_urls(children):
     return urls
 
 
-def download_file(url, subreddit=None):
+def spider(subreddit, pages):
+    print "Spidering subreddit %s (%s pages)" % (subreddit, pages)
+    after = None
+    urls = []
+    for i in range(pages):
+        print "Loading page", i + 1, 'of /r/%s' % subreddit
+        r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
+            (subreddit, 25 * i, after))
+        j = loads(r.content)
+        after = j['data']['after']
+        urls.extend(get_urls(j['data']['children']))
+
+    print 'Downloading images for /r/%s' % subreddit
+    for url in urls:
+        threading.Thread(target=download_file, args=(url, subreddit)).start()
+
+def download_file(url, subreddit):
     file_name = url.split('/')[-1]
 
-    if subreddit:
-        try:
-            mkdir(subreddit)
-        except OSError:
-            pass
-        file_name = "./%s/%s" % (subreddit, file_name)
-
-    if exists(file_name):
-        raise ExistsError
+    try:
+        mkdir(subreddit)
+    except OSError:
+        pass
+    file_name = "%s/%s" % (subreddit, file_name)
 
     try:
+        if exists(file_name):
+            raise ExistsError
+
         r = get(url)
         f = open(file_name, 'wb')
         print 'Downloading %s, file-size: %2.2fKB' % \
@@ -66,6 +82,8 @@ def download_file(url, subreddit=None):
         f.close()
     except IndexError:
         print "Failed %s" % url
+    except ExistsError:
+        print "Skipping %s, file exists." % file_name
 
 if __name__ == '__main__':
     try:
@@ -83,19 +101,4 @@ if __name__ == '__main__':
         pages = 1
 
     for subreddit in subreddits:
-        after = None
-        urls = []
-        for i in range(int(pages)):
-            print "Loading page", i + 1, 'of /r/%s' % subreddit
-            r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
-                (subreddit, 25 * i, after))
-            j = loads(r.content)
-            after = j['data']['after']
-            print after
-            urls.extend(get_urls(j['data']['children']))
-
-        for url in urls:
-            try:
-                download_file(url, subreddit)
-            except ExistsError:
-                print "Skipping %s, file exists." % url
+        threading.Thread(target=spider, args=(subreddit, int(pages))).start()
