@@ -5,7 +5,6 @@ from requests import get
 from json import loads
 from os.path import exists
 from os import mkdir
-from time import sleep
 import re
 import sys
 
