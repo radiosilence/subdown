@@ -11,7 +11,7 @@ import sys
 
 global open_files, OPEN_FILE_LIMIT
 
-OPEN_FILE_LIMIT = 100
+OPEN_FILE_LIMIT = 512
 
 open_files = 0
 
@@ -100,7 +100,8 @@ def download_file(url, subreddit, total, num):
                 print "%s Downloading %s, file-size: Unknown" % (tag, url)
             f.write(r.content)
             print "%s %s Finished!" % (tag, url)
-        except (IndexError, AttributeError):            print "%s Failed %s" % (tag, url)
+        except (IndexError, AttributeError):
+            print "%s Failed %s" % (tag, url)
         f.close()
         open_files += -1
     except ExistsError:
