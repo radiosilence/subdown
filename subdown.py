@@ -5,8 +5,16 @@ from requests import get
 from json import loads
 from os.path import exists
 from os import mkdir
+from time import sleep
 import re
 import sys
+
+global open_files, OPEN_FILE_LIMIT
+
+OPEN_FILE_LIMIT = 100
+
+open_files = 0
+
 
 class UsageError(Exception):
     pass
@@ -60,12 +68,14 @@ def spider(subreddit, pages):
     i = 1
     num_urls = len(urls)
     for url in urls:
-        threading.Thread(target=download_file, args=(url, subreddit, num_urls, i)).start()
+        threading.Thread(target=download_file, \
+            args=(url, subreddit, num_urls, i)).start()
         i += 1
 
 
 def download_file(url, subreddit, total, num):
     file_name = url.split('/')[-1]
+    global open_files, OPEN_FILE_LIMIT
     tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
         mkdir(subreddit)
@@ -76,8 +86,11 @@ def download_file(url, subreddit, total, num):
     try:
         if exists(file_name):
             raise ExistsError
+        while open_files > OPEN_FILE_LIMIT:
+            pass
+        open_files += 1
+        f = open(file_name, 'wb')
         try:
-            f = open(file_name, 'wb')
             r = get(url)
 
             try:
@@ -87,10 +100,9 @@ def download_file(url, subreddit, total, num):
                 print "%s Downloading %s, file-size: Unknown" % (tag, url)
             f.write(r.content)
             print "%s %s Finished!" % (tag, url)
-        except IndexError:
-            print "%s Failed %s" % (tag, url)
-        finally:
-            f.close()
+        except (IndexError, AttributeError):            print "%s Failed %s" % (tag, url)
+        f.close()
+        open_files += -1
     except ExistsError:
             print "%s Skipping %s, file exists." % (tag, file_name)
 
