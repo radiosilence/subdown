@@ -8,7 +8,6 @@ from os import mkdir
 import re
 import sys
 
-
 class UsageError(Exception):
     pass
 
@@ -58,13 +57,16 @@ def spider(subreddit, pages):
         urls.extend(get_urls(j['data']['children']))
 
     print 'Downloading images for /r/%s' % subreddit
+    i = 1
+    num_urls = len(urls)
     for url in urls:
-        threading.Thread(target=download_file, args=(url, subreddit)).start()
+        threading.Thread(target=download_file, args=(url, subreddit, num_urls, i)).start()
+        i += 1
 
 
-def download_file(url, subreddit):
+def download_file(url, subreddit, total, num):
     file_name = url.split('/')[-1]
-
+    tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
         mkdir(subreddit)
     except OSError:
@@ -74,20 +76,23 @@ def download_file(url, subreddit):
     try:
         if exists(file_name):
             raise ExistsError
-
-        r = get(url)
-        f = open(file_name, 'wb')
         try:
-            print 'Downloading %s, file-size: %2.2fKB' % \
-                (url, float(r.headers['content-length']) / 1000)
-        except TypeError:
-            print "Downloading %s, file-size: Unknown" % url
-        f.write(r.content)
-        f.close()
-    except IndexError:
-        print "Failed %s" % url
+            f = open(file_name, 'wb')
+            r = get(url)
+
+            try:
+                print '%s Downloading %s, file-size: %2.2fKB' % \
+                    (tag, url, float(r.headers['content-length']) / 1000)
+            except TypeError:
+                print "%s Downloading %s, file-size: Unknown" % (tag, url)
+            f.write(r.content)
+            print "%s %s Finished!" % (tag, url)
+        except IndexError:
+            print "%s Failed %s" % (tag, url)
+        finally:
+            f.close()
     except ExistsError:
-        print "Skipping %s, file exists." % file_name
+            print "%s Skipping %s, file exists." % (tag, file_name)
 
 if __name__ == '__main__':
     try:
