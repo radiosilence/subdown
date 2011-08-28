@@ -11,7 +11,7 @@ import sys
 
 global open_files, OPEN_FILE_LIMIT
 
-OPEN_FILE_LIMIT = 512
+OPEN_FILE_LIMIT = 256
 
 open_files = 0
 
