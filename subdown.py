@@ -4,7 +4,6 @@ from requests import get
 from json import loads
 from os.path import exists
 from os import mkdir
-import urllib2
 import re
 import sys
 
@@ -59,32 +58,14 @@ def download_file(url, subreddit=None):
         raise ExistsError
 
     try:
-        u = urllib2.urlopen(url)
-        meta = u.info()
-        file_size = int(meta.getheaders("Content-Length")[0])
+        r = get(url)
         f = open(file_name, 'wb')
-        print "Downloading: %s Bytes: %s" % (file_name, file_size)
-
-        file_size_dl = 0
-        block_sz = 8192
-        while True:
-            buffer = u.read(block_sz)
-            if not buffer:
-                break
-
-            file_size_dl += len(buffer)
-            f.write(buffer)
-            status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100.
-            / file_size)
-            status = status + chr(8) * (len(status) + 1)
-            print status,
-
+        print 'Downloading %s, file-size: %2.2fKB' % \
+            (url, float(r.headers['content-length']) / 1000)
+        f.write(r.content)
         f.close()
     except IndexError:
         print "Failed %s" % url
-    except urllib2.URLError:
-        print "Failed %s" % url
-
 
 if __name__ == '__main__':
     try:
@@ -96,15 +77,15 @@ if __name__ == '__main__':
         exit()
 
     try:
-        PAGES = sys.argv[2]
+        pages = sys.argv[2]
     except IndexError:
         print "Pages not specified, defaulting to one."
-        PAGES = 1
+        pages = 1
 
-    urls = []
-    after = None
     for subreddit in subreddits:
-        for i in range(int(PAGES)):
+        after = None
+        urls = []
+        for i in range(int(pages)):
             print "Loading page", i + 1, 'of /r/%s' % subreddit
             r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
                 (subreddit, 25 * i, after))
@@ -116,7 +97,5 @@ if __name__ == '__main__':
         for url in urls:
             try:
                 download_file(url, subreddit)
-            except urllib2.HTTPError:
-                print "HTTP Error while downloading %s" % url
             except ExistsError:
                 print "Skipping %s, file exists." % url
