@@ -4,11 +4,12 @@ import threading
 from requests import get
 from json import loads
 from os.path import exists
-from os import mkdir
+from os import mkdir, utime
+import time
 import re
 import sys
 
-global open_files, OPEN_FILE_LIMIT
+#global open_files, OPEN_FILE_LIMIT
 
 OPEN_FILE_LIMIT = 256
 
@@ -42,9 +43,10 @@ def get_urls(children):
     urls = []
     for sub in children:
         url = sub['data']['url']
+        time = int(sub['data']['created'])
         try:
             xurl = find_url(url)
-            urls.append(xurl)
+            urls.append({'href': xurl, 'time': time})
             print "Added image %s" % xurl
         except InvalidURLError:
             print "No image found at %s" % url
@@ -73,7 +75,7 @@ def spider(subreddit, pages):
 
 
 def download_file(url, subreddit, total, num):
-    file_name = url.split('/')[-1]
+    file_name = url['href'].split('/')[-1]
     global open_files, OPEN_FILE_LIMIT
     tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
@@ -90,21 +92,25 @@ def download_file(url, subreddit, total, num):
         open_files += 1
         f = open(file_name, 'wb')
         try:
-            r = get(url)
+            r = get(url['href'])
 
             try:
                 print '%s Downloading %s, file-size: %2.2fKB' % \
-                    (tag, url, float(r.headers['content-length']) / 1000)
+                    (tag, url['href'], float(r.headers['content-length']) \
+                        / 1000)
             except TypeError:
-                print "%s Downloading %s, file-size: Unknown" % (tag, url)
+                print "%s Downloading %s, file-size: Unknown" % \
+                    (tag, url['href'])
             f.write(r.content)
-            print "%s %s Finished!" % (tag, url)
+            print "%s %s Finished!" % (tag, url['href'])
         except (IndexError, AttributeError):
-            print "%s Failed %s" % (tag, url)
+            print "%s Failed %s" % (tag, url['href'])
         f.close()
         open_files += -1
     except ExistsError:
             print "%s Skipping %s, file exists." % (tag, file_name)
+    nows = int(time.time())
+    utime(file_name, (nows, url['time']))
 
 if __name__ == '__main__':
     try:
