@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # Reddit pics downloader
 import threading
-from requests import get
+from requests import get, TooManyRedirects
 from json import loads
 from os.path import exists
 from os import mkdir, utime
@@ -43,10 +43,10 @@ def get_urls(children):
     urls = []
     for sub in children:
         url = sub['data']['url']
-        time = int(sub['data']['created'])
+        stamp = int(sub['data']['created'])
         try:
             xurl = find_url(url)
-            urls.append({'href': xurl, 'time': time})
+            urls.append({'href': xurl, 'time': stamp})
             print "Added image %s" % xurl
         except InvalidURLError:
             print "No image found at %s" % url
@@ -103,6 +103,8 @@ def download_file(url, subreddit, total, num):
                     (tag, url['href'])
             f.write(r.content)
             print "%s %s Finished!" % (tag, url['href'])
+        except TooManyRedirects:
+            print "Too many redirects for file %s." % url['href']
         except (IndexError, AttributeError):
             print "%s Failed %s" % (tag, url['href'])
         f.close()
