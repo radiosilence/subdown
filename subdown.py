@@ -66,7 +66,7 @@ def spider(subreddit, pages):
     p = Pool(processes=20)
     result = p.map_async(download_file, [(url, subreddit) for url in urls])
     try:
-        result.get(timeout=60*int(pages))
+        result.get()
     except TimeoutError:
         print "Unfortunately, /r/%s took took long." % subreddit
     sys.exit()
