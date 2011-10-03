@@ -1,6 +1,6 @@
 #!/usr/bin/python2.7
 # Reddit pics downloader
-from multiprocessing import Process
+from multiprocessing import Process, Pool, TimeoutError
 from requests import get, TooManyRedirects
 from json import loads
 from os.path import exists
@@ -60,18 +60,21 @@ def spider(subreddit, pages):
         urls.extend(get_urls(j['data']['children']))
 
     print 'Downloading images for /r/%s' % subreddit
-    i = 1
-    num_urls = len(urls)
-    for url in urls:
-        Process(target=download_file, \
-            args=(url, subreddit, num_urls, i)).start()
-        i += 1
+    
+    p = Pool(processes=20)
+    result = p.map_async(download_file, [(url, subreddit) for url in urls])
+    try:
+        result.get(timeout=20*int(pages))
+    except TimeoutError:
+        print "Unfortunately, /r/%s took took long." % subreddit
     sys.exit()
 
 
-def download_file(url, subreddit, total, num):
+def download_file(args):
+    url = args[0]
+    subreddit = args[1]
     file_name = url['href'].split('/')[-1]
-    tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
+    #tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
         mkdir(subreddit)
     except OSError:
@@ -88,31 +91,31 @@ def download_file(url, subreddit, total, num):
                 f = open(file_name, 'wb')
                 opened = True
             except IOError:
-                print tag, "Too man open files, sleeping."
-                sleep(1)
+                pass
 
         try:
-            r = get(url['href'])
+            r = get(url['href'], timeout=10)
 
             try:
-                print '%s Downloading %s, file-size: %2.2fKB' % \
-                    (tag, url['href'], float(r.headers['content-length']) \
+                print 'Downloading %s, file-size: %2.2fKB' % \
+                    (url['href'], float(r.headers['content-length']) \
                         / 1000)
             except TypeError:
                 print "%s Downloading %s, file-size: Unknown" % \
                     (tag, url['href'])
             f.write(r.content)
-            print "%s %s Finished!" % (tag, url['href'])
+            message =  "%s Finished!" % url['href']
         except TooManyRedirects:
-            print "Too many redirects for file %s." % url['href']
+            message = "Too many redirects for file %s." % url['href']
         except (IndexError, AttributeError):
-            print "%s Failed %s" % (tag, url['href'])
+            message = "Failed %s" % url['href']
         f.close()
     except ExistsError:
-            print "%s Skipping %s, file exists." % (tag, file_name)
+            message = "Skipping %s, file exists." % file_name
     nows = int(time.time())
     utime(file_name, (nows, url['time']))
-    sys.exit()
+    print message
+    return message
 
 def main():
     try:
