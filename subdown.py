@@ -102,8 +102,8 @@ def download_file(args):
                     (url['href'], float(r.headers['content-length']) \
                         / 1000)
             except TypeError:
-                print "%s Downloading %s, file-size: Unknown" % \
-                    (tag, url['href'])
+                print "Downloading %s, file-size: Unknown" % \
+                    (url['href'])
             f.write(r.content)
             message =  "%s Finished!" % url['href']
         except TooManyRedirects:
