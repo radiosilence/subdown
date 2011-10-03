@@ -39,7 +39,7 @@ def get_urls(children):
         stamp = int(sub['data']['created'])
         try:
             xurl = find_url(url)
-            urls.append({'href': xurl, 'time': stamp})
+            urls.append({'href': xurl, 'time': stamp, 'subreddit': sub['data']['subreddit']})
             print "Added image %s" % xurl
         except InvalidURLError:
             print "No image found at %s" % url
@@ -59,8 +59,10 @@ def spider(subreddit, pages):
         
         urls.extend(get_urls(j['data']['children']))
 
+    if subreddit != urls[0]['subreddit']:
+        print "Correcting case /r/%s ==> /r/%s" % (subreddit, urls[0]['subreddit'])
+        subreddit = urls[0]['subreddit']
     print 'Downloading images for /r/%s' % subreddit
-    
     p = Pool(processes=20)
     result = p.map_async(download_file, [(url, subreddit) for url in urls])
     try:
@@ -74,7 +76,6 @@ def download_file(args):
     url = args[0]
     subreddit = args[1]
     file_name = url['href'].split('/')[-1]
-    #tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
         mkdir(subreddit)
     except OSError:
