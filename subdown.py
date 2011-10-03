@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.7
 # Reddit pics downloader
 import threading
 from requests import get, TooManyRedirects
@@ -11,7 +11,7 @@ import sys
 
 #global open_files, OPEN_FILE_LIMIT
 
-OPEN_FILE_LIMIT = 256
+OPEN_FILE_LIMIT = 512
 
 open_files = 0
 
@@ -63,6 +63,7 @@ def spider(subreddit, pages):
             (subreddit, 25 * i, after))
         j = loads(r.content)
         after = j['data']['after']
+        
         urls.extend(get_urls(j['data']['children']))
 
     print 'Downloading images for /r/%s' % subreddit
@@ -114,7 +115,7 @@ def download_file(url, subreddit, total, num):
     nows = int(time.time())
     utime(file_name, (nows, url['time']))
 
-if __name__ == '__main__':
+def main():
     try:
         subreddits = sys.argv[1].split(',')
         if subreddits[0] == '--help':
@@ -131,3 +132,7 @@ if __name__ == '__main__':
 
     for subreddit in subreddits:
         threading.Thread(target=spider, args=(subreddit, int(pages))).start()
+        
+        
+if __name__ == '__main__':
+    main()
