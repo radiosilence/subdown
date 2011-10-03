@@ -9,13 +9,6 @@ import time
 import re
 import sys
 
-#global open_files, OPEN_FILE_LIMIT
-
-OPEN_FILE_LIMIT = 512
-
-open_files = 0
-
-
 class UsageError(Exception):
     pass
 
@@ -77,7 +70,6 @@ def spider(subreddit, pages):
 
 def download_file(url, subreddit, total, num):
     file_name = url['href'].split('/')[-1]
-    global open_files, OPEN_FILE_LIMIT
     tag = '[/r/%s:%d/%d]' % (subreddit, num, total)
     try:
         mkdir(subreddit)
@@ -88,10 +80,16 @@ def download_file(url, subreddit, total, num):
     try:
         if exists(file_name):
             raise ExistsError
-        while open_files > OPEN_FILE_LIMIT:
-            pass
-        open_files += 1
-        f = open(file_name, 'wb')
+
+        opened = False
+        while not opened:
+            try:
+                f = open(file_name, 'wb')
+                opened = True
+            except IOError:
+                print tag, "Too man open files, sleeping."
+                sleep(1)
+
         try:
             r = get(url['href'])
 
@@ -109,7 +107,6 @@ def download_file(url, subreddit, total, num):
         except (IndexError, AttributeError):
             print "%s Failed %s" % (tag, url['href'])
         f.close()
-        open_files += -1
     except ExistsError:
             print "%s Skipping %s, file exists." % (tag, file_name)
     nows = int(time.time())
