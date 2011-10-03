@@ -1,6 +1,6 @@
 #!/usr/bin/python2.7
 # Reddit pics downloader
-import threading
+from multiprocessing import Process
 from requests import get, TooManyRedirects
 from json import loads
 from os.path import exists
@@ -63,9 +63,10 @@ def spider(subreddit, pages):
     i = 1
     num_urls = len(urls)
     for url in urls:
-        threading.Thread(target=download_file, \
+        Process(target=download_file, \
             args=(url, subreddit, num_urls, i)).start()
         i += 1
+    sys.exit()
 
 
 def download_file(url, subreddit, total, num):
@@ -111,6 +112,7 @@ def download_file(url, subreddit, total, num):
             print "%s Skipping %s, file exists." % (tag, file_name)
     nows = int(time.time())
     utime(file_name, (nows, url['time']))
+    sys.exit()
 
 def main():
     try:
@@ -128,7 +130,7 @@ def main():
         pages = 1
 
     for subreddit in subreddits:
-        threading.Thread(target=spider, args=(subreddit, int(pages))).start()
+        Process(target=spider, args=(subreddit, int(pages))).start()
         
         
 if __name__ == '__main__':
