@@ -3,7 +3,7 @@
 from multiprocessing import Process, Pool, TimeoutError
 from requests import get, TooManyRedirects
 from json import loads
-from os.path import exists
+from os.path import exists, getsize
 from os import mkdir, utime
 import time
 import re
@@ -115,6 +115,9 @@ def download_file(args):
             message = "Skipping %s, file exists." % file_name
     nows = int(time.time())
     utime(file_name, (nows, url['time']))
+    if getsize(file_name) < 50:
+        message = """File size of %s is less than 50 bytes and thus unlikely to be a
+ valid image - deleting!""" % file_name
     print message
     return message
 
