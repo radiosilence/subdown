@@ -9,6 +9,7 @@ import time
 import re
 import sys
 
+
 class UsageError(Exception):
     pass
 
@@ -22,7 +23,7 @@ class ExistsError(Exception):
 
 
 def find_url(url):
-    if re.search(r"(jpg|png|jpeg)$", url):
+    if re.search(r"(jpg|png|jpeg|gif)$", url):
         return url
     else:
         mo = re.search(r"http://imgur\.com/([a-zA-Z0-9]+)", url)
@@ -39,7 +40,11 @@ def get_urls(children):
         stamp = int(sub['data']['created'])
         try:
             xurl = find_url(url)
-            urls.append({'href': xurl, 'time': stamp, 'subreddit': sub['data']['subreddit']})
+            urls.append({
+                'href': xurl,
+                'time': stamp,
+                'subreddit': sub['data']['subreddit']
+            })
             print "Added image %s" % xurl
         except InvalidURLError:
             print "No image found at %s" % url
@@ -56,11 +61,12 @@ def spider(subreddit, pages):
             (subreddit, 25 * i, after))
         j = loads(r.content)
         after = j['data']['after']
-        
+
         urls.extend(get_urls(j['data']['children']))
 
     if subreddit != urls[0]['subreddit']:
-        print "Correcting case /r/%s ==> /r/%s" % (subreddit, urls[0]['subreddit'])
+        print "Correcting case /r/%s ==> /r/%s" % \
+            (subreddit, urls[0]['subreddit'])
         subreddit = urls[0]['subreddit']
     print 'Downloading images for /r/%s' % subreddit
     p = Pool(processes=20)
@@ -105,7 +111,7 @@ def download_file(args):
                 print "Downloading %s, file-size: Unknown" % \
                     (url['href'])
             f.write(r.content)
-            message =  "%s Finished!" % url['href']
+            message = "%s Finished!" % url['href']
         except TooManyRedirects:
             message = "Too many redirects for file %s." % url['href']
         except (IndexError, AttributeError):
@@ -116,10 +122,11 @@ def download_file(args):
     nows = int(time.time())
     utime(file_name, (nows, url['time']))
     if getsize(file_name) < 50:
-        message = """File size of %s is less than 50 bytes and thus unlikely to be a
- valid image - deleting!""" % file_name
+        message = """File size of %s is less than 50 bytes and
+ thus unlikely to be a valid image - deleting!""" % file_name
     print message
     return message
+
 
 def main():
     try:
@@ -138,7 +145,6 @@ def main():
 
     for subreddit in subreddits:
         Process(target=spider, args=(subreddit, int(pages))).start()
-        
-        
+
 if __name__ == '__main__':
     main()
