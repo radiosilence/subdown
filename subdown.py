@@ -70,7 +70,7 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_r
 
         if subreddit != urls[0]['subreddit']:
             subreddit = urls[0]['subreddit']
-        subreddit_progress[subreddit] = i+1
+        subreddit_progress[subreddit] = (bar(i+1, pages), '(%s/%s)' % (i+1, pages))
 
         for url in urls:
             if url['href'].split('/')[-1] == 'a.jpg':
@@ -79,9 +79,6 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_r
             d = download_file(url, aria2, skipped, time_register)
             if d:
                 gids.append(d)
-
-    subreddit_progress[subreddit] = '%s (Done)' % \
-        subreddit_progress[subreddit]
     
     return gids
 
@@ -116,6 +113,16 @@ def remove_broken_file(url):
         return True
     return False
 
+def bar(current, total, length=20):
+    if int(total) == 0:
+        prog = 0
+    else:
+        prog = (int(current) * length) / int(total)
+    
+    return '[%s%s]' % (
+        '#' * prog,
+        '-' * (length - prog)
+    )
 def main():
     try:
         subreddits = sys.argv[1].split(',')
@@ -137,11 +144,12 @@ def main():
         'aria2c',
         '--enable-rpc',
         '--allow-overwrite',
-        '-j', '20'
+        '-j', '20',
+        '-t', '10'  
     ], stdout=null)
     xrpc = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
     results = []
-    spiders = Pool(processes=4)
+    spiders = Pool(processes=10)
 
     gids = manager.list()
     skipped = manager.Value('i', 0)
@@ -168,8 +176,12 @@ def main():
     xrpc.aria2.forceShutdown()
 
     now = datetime.now()
+    print "Sorting out timestamps..."
     for file_name, when in time_register.items():
-        utime(file_name, (time.time(), when))
+        if exists(file_name):
+            dt = datetime.fromtimestamp(when)
+            print "Date Modified: %s <-- %s" % (file_name, dt.strftime('%c'))
+            utime(file_name, (time.time(), when))
     time.sleep(1)
     p.terminate()
     null.close()
@@ -191,17 +203,9 @@ def show_status(gids, state, skipped, subreddit_progress, time_register):
             if len(uri) > 100:
                 uri = uri[:97] + '...'
             
-            if int(s['totalLength']) == 0:
-                prog = 0
-            else:
-                prog = (int(s['completedLength']) *  20) / int(s['totalLength'])
-            
-            bar = '[%s%s]' % (
-                '#' * prog,
-                '-' * (20 - prog)
-            )
+            b = bar(s['completedLength'], s['totalLength'])
             statuses.append('%s %s: %s (%sKB/%sKB)' % (
-                bar, uri, s['status'],
+                b, uri, s['status'],
                 float(s['completedLength']) / 1024.0,
                 float(s['totalLength']) / 1024.0
             ))
@@ -226,7 +230,7 @@ def show_status(gids, state, skipped, subreddit_progress, time_register):
             print ""
 
         for k, v in subreddit_progress.items():
-            print '%s: Page %s' % (k, v)
+            print '%s Subreddit: %s %s' % (v[0], k, v[1])
         print "\n".join(statuses[:40])
         i += 1
     return True
