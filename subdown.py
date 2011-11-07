@@ -135,7 +135,7 @@ def main():
 
     ], stdout=null)
     results = []
-    spiders = Pool(processes=4)
+    spiders = Pool(processes=10)
 
     gids = manager.list()
     skipped = manager.Value('i', 0)
