@@ -149,7 +149,7 @@ def main():
 
     ], stdout=null)
     results = []
-    spiders = Pool(processes=5)
+    spiders = Pool(processes=4)
 
     gids = manager.list()
     skipped = manager.Value('i', 0)
@@ -182,44 +182,42 @@ def show_status(gids, state, skipped, subreddit_progress, time_register):
     incomplete = 0
     complete = 0
     while incomplete > 0 or state.value == 1:
-        time.sleep(0)
         statuses = []
         incomplete = 0
         error = 0
-        s = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
-        mc = xmlrpclib.MultiCall(s)
-        for gid in gids:
-            mc.aria2.tellStatus(gid)
-        r = mc()
-
-        for s in list(r):
+        xrpc = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
+        active = xrpc.aria2.tellActive()
+        for s in active:
             uri = s['files'][0]['uris'][0]['uri']
             if len(uri) > 58:
                 uri = uri[:55] + '...'
-            if s['status'] == 'complete':
-                gids.remove(s['gid'])
-                process_time(s['files'][0]['path'], time_register)
-                complete += 1
-            elif s['status'] == 'error':
-                error += 1
-                statuses.append('%s: %s' % (uri, s['status']))
-            else:
-                incomplete += 1
-                statuses.append('%s: %s [%sKB/%sKB]' % (
-                    uri, s['status'],
-                    float(s['completedLength']) / 1024.0,
-                    float(s['totalLength']) / 1024.0))
+            statuses.append('%s: %s [%sKB/%sKB]' % (
+                uri, s['status'],
+                float(s['completedLength']) / 1024.0,
+                float(s['totalLength']) / 1024.0))
+        waiting = xrpc.aria2.tellWaiting(0, 40)
+        for s in waiting:
+            uri = s['files'][0]['uris'][0]['uri']
+            if len(uri) > 58:
+                uri = uri[:55] + '...'
+            statuses.append('%s: waiting' % uri)
             
+            
+        stat = xrpc.aria2.getGlobalStat()
+        incomplete = int(stat['numActive']) + int(stat['numWaiting'])
         os.system(['clear', 'cls'][os.name == 'nt'])
-        print "%s complete, %s incomplete, %s error, %s skipped." % \
-                (complete, incomplete, error, skipped.value), spinner[i % 4],
+        print "%s downloading, %s waiting, %s complete, %s incomplete, %s error, %s skipped." % \
+                (stat['numActive'],
+                    stat['numWaiting'],
+                    stat['numStopped'], incomplete, error, skipped.value), spinner[i % 4],
         if state.value:
             print "(scanning subreddits)"
         else:
             print ""
+
         for k, v in subreddit_progress.items():
             print '%s: Page %s' % (k, v)
-        print "\n".join(statuses)
+        print "\n".join(statuses[:40])
         i += 1
     return True
 
