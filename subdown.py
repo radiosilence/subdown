@@ -1,6 +1,6 @@
 #!/usr/bin/python2.7
 # Reddit pics downloader
-from multiprocessing import Process, Pool, TimeoutError, Value, Array
+from multiprocessing import Process, Pool, Manager
 from requests import get, TooManyRedirects
 from json import loads, dumps
 from os.path import exists, getsize, abspath
@@ -23,18 +23,9 @@ class InvalidURLError(BaseException):
 
 class ExistsError(Exception):
     pass
-
 class State:
-    active = False
-    def __init__(self, active):
-        self.active = active
-    def activate(self):
-        self.active = True
-    def deactivate(self):
-        self.active = False
-    @property
-    def state(self):
-        return self.active
+    def __init__(self, value):
+        self.value = value
 
 def find_url(url):
     if re.search(r"(jpg|png|jpeg|gif)$", url):
@@ -64,13 +55,11 @@ def get_urls(children):
     return urls
 
 
-def spider_subreddit(subreddit, pages):
+def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
     aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
-    print "Spidering subreddit %s (%s pages)" % (subreddit, pages)
     after = None
-    gids = []
     for i in range(pages):
-        print "Loading page", i + 1, 'of /r/%s' % subreddit
+        subreddit_progress[subreddit] = i
         r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
             (subreddit, 25 * i, after))
         j = loads(r.content)
@@ -78,12 +67,10 @@ def spider_subreddit(subreddit, pages):
         urls = get_urls(j['data']['children'])
 
         if subreddit != urls[0]['subreddit']:
-            print "Correcting case /r/%s ==> /r/%s" % \
-                (subreddit, urls[0]['subreddit'])
             subreddit = urls[0]['subreddit']
 
         for url in urls:
-            d = download_file(url, aria2)
+            d = download_file(url, aria2, skipped)
             if d:
                 gids.append(d)
     return gids
@@ -94,7 +81,7 @@ def get_filename(url):
 def update_time(url):
     utime(get_filename(url), (nows, url['time']))
 
-def download_file(url, aria2):
+def download_file(url, aria2, skipped):
     subreddit = url['subreddit']
     try:
         mkdir(subreddit)
@@ -113,7 +100,7 @@ def download_file(url, aria2):
         })
         return gid
     except ExistsError:
-        print "Skipping %s, file exists." % file_name
+        skipped.value += 1
         return None
 
 def remove_broken_file(url):
@@ -123,7 +110,6 @@ def remove_broken_file(url):
         return True
     return False
 
-GIDS = []
 def main():
     try:
         subreddits = sys.argv[1].split(',')
@@ -132,12 +118,13 @@ def main():
     except (IndexError, UsageError):
         print "Usage: subdown.py <subreddit[,subreddit]> [pages]"
         exit()
-
     try:
         pages = int(sys.argv[2])
     except IndexError:
         print "Pages not specified, defaulting to one."
         pages = 1
+    
+    manager = Manager()
 
     null = open(os.devnull, 'w')
     p = subprocess.Popen([
@@ -148,45 +135,37 @@ def main():
 
     ], stdout=null)
     results = []
-
-
     spiders = Pool(processes=4)
+
+    gids = manager.list()
+    skipped = manager.Value('i', 0)
+    subreddit_progress = manager.dict()
+    state = manager.Value('i', 1)
 
     for subreddit in subreddits:
         result = spiders.apply_async(
             spider_subreddit,
-            (subreddit, pages),
-            callback=extend_gids
+            (subreddit, pages, gids, skipped,
+                subreddit_progress)
         )
         results.append(result)
     
-    state = State(True)
-    display = Thread(target=show_status, args=(GIDS, state))
+    display = Thread(target=show_status, args=(
+        gids, state, skipped, subreddit_progress
+    ))
     display.start()
     for result in results:
         result.wait()
-    state.value = False
+    state.value = 0
     display.join()
     p.terminate()
     null.close()
 
-def extend_gids(gids):
-    GIDS.extend(gids)
-
-
-class State:
-    def __init__(self, value):
-        self.value = value
-
-
-
-def show_status(gids, state):
+def show_status(gids, state, skipped, subreddit_progress):
     i = 0
     spinner = ['-', '\\', '|', '/']
     incomplete = 0
-    import pprint
-    pp = pprint.PrettyPrinter(indent=2)
-    while incomplete > 0 or state.value == True or len(gids) == 0:
+    while incomplete > 0 or state.value == 1:
         time.sleep(0.1)
         statuses = []
         incomplete = 0
@@ -204,7 +183,6 @@ def show_status(gids, state):
                 uri = uri[:25] + '...'
             if s['status'] == 'complete':
                 complete += 1
-                statuses.append('%s: %s' % (uri, s['status']))
             elif s['status'] == 'error':
                 error += 1
                 statuses.append('%s: %s' % (uri, s['status']))
@@ -216,9 +194,15 @@ def show_status(gids, state):
                     float(s['totalLength']) / 1024.0))
             
         os.system(['clear', 'cls'][os.name == 'nt'])
+        print "%s complete, %s incomplete, %s error, %s skipped." % \
+                (complete, incomplete, error, skipped.value), spinner[i % 4],
+        if state.value:
+            print "(scanning subreddits)"
+            for k, v in subreddit_progress.items():
+                print '%s: Page %s' % (k, v + 1)
+        else:
+            print ""
         print "\n".join(statuses)
-        print "%s complete, %s incomplete, %s error." % \
-            (complete, incomplete, error), spinner[i % 4]
         i += 1
     return True
 
