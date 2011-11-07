@@ -8,6 +8,7 @@ from os import mkdir, utime
 from threading import Thread
 import os
 import time
+from datetime import datetime
 import re
 import sys
 import subprocess
@@ -55,7 +56,7 @@ def get_urls(children):
     return urls
 
 
-def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
+def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_register):
     aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
     after = None
     for i in range(pages):
@@ -72,7 +73,8 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
         subreddit_progress[subreddit] = i+1
 
         for url in urls:
-            d = download_file(url, aria2, skipped)
+            time_register[get_filename(url)] = url['time']
+            d = download_file(url, aria2, skipped, time_register)
             if d:
                 gids.append(d)
 
@@ -84,10 +86,15 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
 def get_filename(url):
     return "%s/%s" % (url['subreddit'], url['href'].split('/')[-1])
 
-def update_time(url):
-    utime(get_filename(url), (nows, url['time']))
+def process_time(file_name, time_register):
+    now = datetime.now()
+    return True
+    try:
+        utime(get_filename(url), (now, time_register[file_name]))
+    except KeyError:
+        print file_name, "not found in time register."
 
-def download_file(url, aria2, skipped):
+def download_file(url, aria2, skipped, time_register):
     subreddit = url['subreddit']
     try:
         mkdir(subreddit)
@@ -98,7 +105,7 @@ def download_file(url, aria2, skipped):
         return None
     directory = "/".join(file_name.split("/")[:-1])
     try:
-        if exists(file_name):
+        if exists(file_name) and not exists(file_name + '.aria2'):
             if not remove_broken_file(url):
                 raise ExistsError
         gid = aria2.addUri([url['href']], {
@@ -107,6 +114,7 @@ def download_file(url, aria2, skipped):
         return gid
     except ExistsError:
         skipped.value += 1
+#        process_time(file_name, time_register)
         return None
 
 def remove_broken_file(url):
@@ -146,18 +154,19 @@ def main():
     gids = manager.list()
     skipped = manager.Value('i', 0)
     subreddit_progress = manager.dict()
+    time_register = manager.dict()
     state = manager.Value('i', 1)
 
     for subreddit in subreddits:
         result = spiders.apply_async(
             spider_subreddit,
             (subreddit, pages, gids, skipped,
-                subreddit_progress)
+                subreddit_progress, time_register)
         )
         results.append(result)
     
     display = Thread(target=show_status, args=(
-        gids, state, skipped, subreddit_progress
+        gids, state, skipped, subreddit_progress, time_register
     ))
     display.start()
     for result in results:
@@ -167,15 +176,15 @@ def main():
     p.terminate()
     null.close()
 
-def show_status(gids, state, skipped, subreddit_progress):
+def show_status(gids, state, skipped, subreddit_progress, time_register):
     i = 0
     spinner = ['-', '\\', '|', '/']
     incomplete = 0
+    complete = 0
     while incomplete > 0 or state.value == 1:
-        time.sleep(0.1)
+        time.sleep(0)
         statuses = []
         incomplete = 0
-        complete = 0
         error = 0
         s = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
         mc = xmlrpclib.MultiCall(s)
@@ -185,9 +194,11 @@ def show_status(gids, state, skipped, subreddit_progress):
 
         for s in list(r):
             uri = s['files'][0]['uris'][0]['uri']
-            if len(uri) > 28:
-                uri = uri[:25] + '...'
+            if len(uri) > 58:
+                uri = uri[:55] + '...'
             if s['status'] == 'complete':
+                gids.remove(s['gid'])
+                process_time(s['files'][0]['path'], time_register)
                 complete += 1
             elif s['status'] == 'error':
                 error += 1
