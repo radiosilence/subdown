@@ -73,6 +73,8 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_r
         subreddit_progress[subreddit] = i+1
 
         for url in urls:
+            if url['href'].split('/')[-1] == 'a.jpg':
+                continue
             time_register[get_filename(url)] = url['time']
             d = download_file(url, aria2, skipped, time_register)
             if d:
@@ -86,14 +88,6 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_r
 def get_filename(url):
     return "%s/%s" % (url['subreddit'], url['href'].split('/')[-1])
 
-def process_time(file_name, time_register):
-    now = datetime.now()
-    return True
-    try:
-        utime(get_filename(url), (now, time_register[file_name]))
-    except KeyError:
-        print file_name, "not found in time register."
-
 def download_file(url, aria2, skipped, time_register):
     subreddit = url['subreddit']
     try:
@@ -101,8 +95,7 @@ def download_file(url, aria2, skipped, time_register):
     except OSError:
         pass
     file_name = get_filename(url)
-    if file_name.split('/')[-1] == 'a.jpg':
-        return None
+    
     directory = "/".join(file_name.split("/")[:-1])
     try:
         if exists(file_name) and not exists(file_name + '.aria2'):
@@ -114,7 +107,6 @@ def download_file(url, aria2, skipped, time_register):
         return gid
     except ExistsError:
         skipped.value += 1
-#        process_time(file_name, time_register)
         return None
 
 def remove_broken_file(url):
@@ -174,6 +166,10 @@ def main():
     state.value = 0
     display.join()
     xrpc.aria2.forceShutdown()
+
+    now = datetime.now()
+    for file_name, when in time_register.items():
+        utime(file_name, (time.time(), when))
     time.sleep(1)
     p.terminate()
     null.close()
