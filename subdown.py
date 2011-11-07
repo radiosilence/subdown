@@ -1,14 +1,17 @@
 #!/usr/bin/python2.7
 # Reddit pics downloader
-from multiprocessing import Process, Pool, TimeoutError
+from multiprocessing import Process, Pool, TimeoutError, Value, Array
 from requests import get, TooManyRedirects
-from json import loads
-from os.path import exists, getsize
+from json import loads, dumps
+from os.path import exists, getsize, abspath
 from os import mkdir, utime
+from threading import Thread
+import os
 import time
 import re
 import sys
-
+import subprocess
+import xmlrpclib
 
 class UsageError(Exception):
     pass
@@ -21,6 +24,17 @@ class InvalidURLError(BaseException):
 class ExistsError(Exception):
     pass
 
+class State:
+    active = False
+    def __init__(self, active):
+        self.active = active
+    def activate(self):
+        self.active = True
+    def deactivate(self):
+        self.active = False
+    @property
+    def state(self):
+        return self.active
 
 def find_url(url):
     if re.search(r"(jpg|png|jpeg|gif)$", url):
@@ -45,89 +59,71 @@ def get_urls(children):
                 'time': stamp,
                 'subreddit': sub['data']['subreddit']
             })
-            print "Added image %s" % xurl
         except InvalidURLError:
-            print "No image found at %s" % url
+            pass
     return urls
 
 
-def spider(subreddit, pages):
+def spider_subreddit(subreddit, pages):
+    aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
     print "Spidering subreddit %s (%s pages)" % (subreddit, pages)
     after = None
-    urls = []
+    gids = []
     for i in range(pages):
         print "Loading page", i + 1, 'of /r/%s' % subreddit
         r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
             (subreddit, 25 * i, after))
         j = loads(r.content)
         after = j['data']['after']
+        urls = get_urls(j['data']['children'])
 
-        urls.extend(get_urls(j['data']['children']))
+        if subreddit != urls[0]['subreddit']:
+            print "Correcting case /r/%s ==> /r/%s" % \
+                (subreddit, urls[0]['subreddit'])
+            subreddit = urls[0]['subreddit']
 
-    if subreddit != urls[0]['subreddit']:
-        print "Correcting case /r/%s ==> /r/%s" % \
-            (subreddit, urls[0]['subreddit'])
-        subreddit = urls[0]['subreddit']
-    print 'Downloading images for /r/%s' % subreddit
-    p = Pool(processes=20)
-    result = p.map_async(download_file, [(url, subreddit) for url in urls])
-    try:
-        result.get()
-    except TimeoutError:
-        print "Unfortunately, /r/%s took took long." % subreddit
-    sys.exit()
+        for url in urls:
+            d = download_file(url, aria2)
+            if d:
+                gids.append(d)
+    return gids
 
+def get_filename(url):
+    return "%s/%s" % (url['subreddit'], url['href'].split('/')[-1])
 
-def download_file(args):
-    url = args[0]
-    subreddit = args[1]
-    file_name = url['href'].split('/')[-1]
+def update_time(url):
+    utime(get_filename(url), (nows, url['time']))
+
+def download_file(url, aria2):
+    subreddit = url['subreddit']
     try:
         mkdir(subreddit)
     except OSError:
         pass
-    file_name = "%s/%s" % (subreddit, file_name)
-
+    file_name = get_filename(url)
+    if file_name.split('/')[-1] == 'a.jpg':
+        return None
+    directory = "/".join(file_name.split("/")[:-1])
     try:
         if exists(file_name):
-            raise ExistsError
-
-        opened = False
-        while not opened:
-            try:
-                f = open(file_name, 'wb')
-                opened = True
-            except IOError:
-                pass
-
-        try:
-            r = get(url['href'], timeout=10)
-
-            try:
-                print 'Downloading %s, file-size: %2.2fKB' % \
-                    (url['href'], float(r.headers['content-length']) \
-                        / 1000)
-            except TypeError:
-                print "Downloading %s, file-size: Unknown" % \
-                    (url['href'])
-            f.write(r.content)
-            message = "%s Finished!" % url['href']
-        except TooManyRedirects:
-            message = "Too many redirects for file %s." % url['href']
-        except (IndexError, AttributeError):
-            message = "Failed %s" % url['href']
-        f.close()
+            if not remove_broken_file(url):
+                raise ExistsError
+        gid = aria2.addUri([url['href']], {
+            'out': file_name
+        })
+        return gid
     except ExistsError:
-            message = "Skipping %s, file exists." % file_name
-    nows = int(time.time())
-    utime(file_name, (nows, url['time']))
+        print "Skipping %s, file exists." % file_name
+        return None
+
+def remove_broken_file(url):
+    file_name = get_filename(url)
     if getsize(file_name) < 50:
-        message = """File size of %s is less than 50 bytes and
- thus unlikely to be a valid image - deleting!""" % file_name
-    print message
-    return message
+        os.remove(file_name)
+        return True
+    return False
 
-
+GIDS = []
 def main():
     try:
         subreddits = sys.argv[1].split(',')
@@ -138,13 +134,94 @@ def main():
         exit()
 
     try:
-        pages = sys.argv[2]
+        pages = int(sys.argv[2])
     except IndexError:
         print "Pages not specified, defaulting to one."
         pages = 1
 
+    null = open(os.devnull, 'w')
+    p = subprocess.Popen([
+        'aria2c',
+        '--enable-rpc',
+        '--allow-overwrite',
+        '-j', '10',
+
+    ], stdout=null)
+    results = []
+
+
+    spiders = Pool(processes=4)
+
     for subreddit in subreddits:
-        Process(target=spider, args=(subreddit, int(pages))).start()
+        result = spiders.apply_async(
+            spider_subreddit,
+            (subreddit, pages),
+            callback=extend_gids
+        )
+        results.append(result)
+    
+    state = State(True)
+    display = Thread(target=show_status, args=(GIDS, state))
+    display.start()
+    for result in results:
+        result.wait()
+    state.value = False
+    display.join()
+    p.terminate()
+    null.close()
+
+def extend_gids(gids):
+    GIDS.extend(gids)
+
+
+class State:
+    def __init__(self, value):
+        self.value = value
+
+
+
+def show_status(gids, state):
+    i = 0
+    spinner = ['-', '\\', '|', '/']
+    incomplete = 0
+    import pprint
+    pp = pprint.PrettyPrinter(indent=2)
+    while incomplete > 0 or state.value == True or len(gids) == 0:
+        time.sleep(0.1)
+        statuses = []
+        incomplete = 0
+        complete = 0
+        error = 0
+        s = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
+        mc = xmlrpclib.MultiCall(s)
+        for gid in gids:
+            mc.aria2.tellStatus(gid)
+        r = mc()
+
+        for s in list(r):
+            uri = s['files'][0]['uris'][0]['uri']
+            if len(uri) > 28:
+                uri = uri[:25] + '...'
+            if s['status'] == 'complete':
+                complete += 1
+                statuses.append('%s: %s' % (uri, s['status']))
+            elif s['status'] == 'error':
+                error += 1
+                statuses.append('%s: %s' % (uri, s['status']))
+            else:
+                incomplete += 1
+                statuses.append('%s: %s [%sKB/%sKB]' % (
+                    uri, s['status'],
+                    float(s['completedLength']) / 1024.0,
+                    float(s['totalLength']) / 1024.0))
+            
+        os.system(['clear', 'cls'][os.name == 'nt'])
+        print "\n".join(statuses)
+        print "%s complete, %s incomplete, %s error." % \
+            (complete, incomplete, error), spinner[i % 4]
+        i += 1
+    return True
+
 
 if __name__ == '__main__':
     main()
