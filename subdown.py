@@ -145,9 +145,9 @@ def main():
         'aria2c',
         '--enable-rpc',
         '--allow-overwrite',
-        '-j', '10',
-
+        '-j', '20'
     ], stdout=null)
+    xrpc = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
     results = []
     spiders = Pool(processes=4)
 
@@ -173,6 +173,8 @@ def main():
         result.wait()
     state.value = 0
     display.join()
+    xrpc.aria2.forceShutdown()
+    time.sleep(1)
     p.terminate()
     null.close()
 
@@ -182,6 +184,7 @@ def show_status(gids, state, skipped, subreddit_progress, time_register):
     incomplete = 0
     complete = 0
     while incomplete > 0 or state.value == 1:
+        time.sleep(0)
         statuses = []
         incomplete = 0
         error = 0
@@ -189,18 +192,29 @@ def show_status(gids, state, skipped, subreddit_progress, time_register):
         active = xrpc.aria2.tellActive()
         for s in active:
             uri = s['files'][0]['uris'][0]['uri']
-            if len(uri) > 58:
-                uri = uri[:55] + '...'
-            statuses.append('%s: %s [%sKB/%sKB]' % (
-                uri, s['status'],
+            if len(uri) > 100:
+                uri = uri[:97] + '...'
+            
+            if int(s['totalLength']) == 0:
+                prog = 0
+            else:
+                prog = (int(s['completedLength']) *  20) / int(s['totalLength'])
+            
+            bar = '[%s%s]' % (
+                '#' * prog,
+                '-' * (20 - prog)
+            )
+            statuses.append('%s %s: %s (%sKB/%sKB)' % (
+                bar, uri, s['status'],
                 float(s['completedLength']) / 1024.0,
-                float(s['totalLength']) / 1024.0))
+                float(s['totalLength']) / 1024.0
+            ))
         waiting = xrpc.aria2.tellWaiting(0, 40)
         for s in waiting:
             uri = s['files'][0]['uris'][0]['uri']
             if len(uri) > 58:
                 uri = uri[:55] + '...'
-            statuses.append('%s: waiting' % uri)
+            statuses.append('[-------waiting------] %s: waiting' % uri)
             
             
         stat = xrpc.aria2.getGlobalStat()
