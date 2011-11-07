@@ -59,20 +59,26 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
     aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
     after = None
     for i in range(pages):
-        subreddit_progress[subreddit] = i
         r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
             (subreddit, 25 * i, after))
         j = loads(r.content)
+        if after == j['data']['after']:
+            break
         after = j['data']['after']
         urls = get_urls(j['data']['children'])
 
         if subreddit != urls[0]['subreddit']:
             subreddit = urls[0]['subreddit']
+        subreddit_progress[subreddit] = i+1
 
         for url in urls:
             d = download_file(url, aria2, skipped)
             if d:
                 gids.append(d)
+
+    subreddit_progress[subreddit] = '%s (Done)' % \
+        subreddit_progress[subreddit]
+    
     return gids
 
 def get_filename(url):
@@ -135,7 +141,7 @@ def main():
 
     ], stdout=null)
     results = []
-    spiders = Pool(processes=10)
+    spiders = Pool(processes=5)
 
     gids = manager.list()
     skipped = manager.Value('i', 0)
@@ -198,10 +204,10 @@ def show_status(gids, state, skipped, subreddit_progress):
                 (complete, incomplete, error, skipped.value), spinner[i % 4],
         if state.value:
             print "(scanning subreddits)"
-            for k, v in subreddit_progress.items():
-                print '%s: Page %s' % (k, v + 1)
         else:
             print ""
+        for k, v in subreddit_progress.items():
+            print '%s: Page %s' % (k, v)
         print "\n".join(statuses)
         i += 1
     return True
