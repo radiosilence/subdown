@@ -1,4 +1,4 @@
-#!/usr/bin/python2.7
+#!/usr/bin/python2
 # Reddit pics downloader
 from multiprocessing import Process, Pool, Manager
 from requests import get, TooManyRedirects
@@ -8,7 +8,6 @@ from os import mkdir, utime
 from threading import Thread
 import os
 import time
-from datetime import datetime
 import re
 import sys
 import subprocess
@@ -56,12 +55,13 @@ def get_urls(children):
     return urls
 
 
-def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_register):
+def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
     aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
     after = None
     for i in range(pages):
         r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
             (subreddit, 25 * i, after))
+
         j = loads(r.content)
         if after == j['data']['after']:
             break
@@ -70,32 +70,35 @@ def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress, time_r
 
         if subreddit != urls[0]['subreddit']:
             subreddit = urls[0]['subreddit']
-        subreddit_progress[subreddit] = (bar(i+1, pages), '(%s/%s)' % (i+1, pages))
+        subreddit_progress[subreddit] = i + 1
 
         for url in urls:
-            if url['href'].split('/')[-1] == 'a.jpg':
-                continue
-            time_register[get_filename(url)] = url['time']
-            d = download_file(url, aria2, skipped, time_register)
+            d = download_file(url, aria2, skipped)
             if d:
                 gids.append(d)
-    
+
+    subreddit_progress[subreddit] = '%s (Done)' % \
+        subreddit_progress[subreddit]
+
     return gids
 
 def get_filename(url):
     return "%s/%s" % (url['subreddit'], url['href'].split('/')[-1])
 
-def download_file(url, aria2, skipped, time_register):
+def update_time(url):
+    utime(get_filename(url), (nows, url['time']))
+
+def download_file(url, aria2, skipped):
     subreddit = url['subreddit']
     try:
         mkdir(subreddit)
     except OSError:
         pass
     file_name = get_filename(url)
-    
-    directory = "/".join(file_name.split("/")[:-1])
+    if file_name.split('/')[-1] == 'a.jpg':
+        return None
     try:
-        if exists(file_name) and not exists(file_name + '.aria2'):
+        if exists(file_name):
             if not remove_broken_file(url):
                 raise ExistsError
         gid = aria2.addUri([url['href']], {
@@ -113,16 +116,6 @@ def remove_broken_file(url):
         return True
     return False
 
-def bar(current, total, length=20):
-    if int(total) == 0:
-        prog = 0
-    else:
-        prog = (int(current) * length) / int(total)
-    
-    return '[%s%s]' % (
-        '#' * prog,
-        '-' * (length - prog)
-    )
 def main():
     try:
         subreddits = sys.argv[1].split(',')
@@ -136,7 +129,7 @@ def main():
     except IndexError:
         print "Pages not specified, defaulting to one."
         pages = 1
-    
+
     manager = Manager()
 
     null = open(os.devnull, 'w')
@@ -144,95 +137,84 @@ def main():
         'aria2c',
         '--enable-rpc',
         '--allow-overwrite',
-        '-j', '20',
-        '-t', '10'  
+        '-j', '10',
+
     ], stdout=null)
-    xrpc = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
     results = []
-    spiders = Pool(processes=10)
+    spiders = Pool(processes=5)
 
     gids = manager.list()
     skipped = manager.Value('i', 0)
     subreddit_progress = manager.dict()
-    time_register = manager.dict()
     state = manager.Value('i', 1)
 
     for subreddit in subreddits:
         result = spiders.apply_async(
             spider_subreddit,
             (subreddit, pages, gids, skipped,
-                subreddit_progress, time_register)
+                subreddit_progress)
         )
         results.append(result)
-    
+
     display = Thread(target=show_status, args=(
-        gids, state, skipped, subreddit_progress, time_register
+        gids, state, skipped, subreddit_progress
     ))
     display.start()
     for result in results:
-        result.wait()
+        try:
+            result.wait()
+        except KeyboardInterrupt:
+            sys.exit(1)
     state.value = 0
     display.join()
-    xrpc.aria2.forceShutdown()
-
-    now = datetime.now()
-    print "Sorting out timestamps..."
-    for file_name, when in time_register.items():
-        if exists(file_name):
-            dt = datetime.fromtimestamp(when)
-            print "Date Modified: %s <-- %s" % (file_name, dt.strftime('%c'))
-            utime(file_name, (time.time(), when))
-    time.sleep(1)
     p.terminate()
     null.close()
 
-def show_status(gids, state, skipped, subreddit_progress, time_register):
+def show_status(gids, state, skipped, subreddit_progress):
     i = 0
     spinner = ['-', '\\', '|', '/']
     incomplete = 0
-    complete = 0
     while incomplete > 0 or state.value == 1:
-        time.sleep(0)
+        time.sleep(0.1)
         statuses = []
         incomplete = 0
+        complete = 0
         error = 0
-        xrpc = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
-        active = xrpc.aria2.tellActive()
-        for s in active:
-            uri = s['files'][0]['uris'][0]['uri']
-            if len(uri) > 100:
-                uri = uri[:97] + '...'
-            
-            b = bar(s['completedLength'], s['totalLength'])
-            statuses.append('%s %s: %s (%sKB/%sKB)' % (
-                b, uri, s['status'],
-                float(s['completedLength']) / 1024.0,
-                float(s['totalLength']) / 1024.0
-            ))
-        waiting = xrpc.aria2.tellWaiting(0, 40)
-        for s in waiting:
-            uri = s['files'][0]['uris'][0]['uri']
-            if len(uri) > 58:
-                uri = uri[:55] + '...'
-            statuses.append('[-------waiting------] %s: waiting' % uri)
-            
-            
-        stat = xrpc.aria2.getGlobalStat()
-        incomplete = int(stat['numActive']) + int(stat['numWaiting'])
-        os.system(['clear', 'cls'][os.name == 'nt'])
-        print "%s downloading, %s waiting, %s complete, %s incomplete, %s error, %s skipped." % \
-                (stat['numActive'],
-                    stat['numWaiting'],
-                    stat['numStopped'], incomplete, error, skipped.value), spinner[i % 4],
-        if state.value:
-            print "(scanning subreddits)"
-        else:
-            print ""
+        try:
+            s = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
+            mc = xmlrpclib.MultiCall(s)
+            for gid in gids:
+                mc.aria2.tellStatus(gid)
+            r = mc()
 
-        for k, v in subreddit_progress.items():
-            print '%s Subreddit: %s %s' % (v[0], k, v[1])
-        print "\n".join(statuses[:40])
-        i += 1
+            for s in list(r):
+                uri = s['files'][0]['uris'][0]['uri']
+                if len(uri) > 28:
+                    uri = uri[:25] + '...'
+                if s['status'] == 'complete':
+                    complete += 1
+                elif s['status'] == 'error':
+                    error += 1
+                    statuses.append('%s: %s' % (uri, s['status']))
+                else:
+                    incomplete += 1
+                    statuses.append('%s: %s [%sKB/%sKB]' % (
+                        uri, s['status'],
+                        float(s['completedLength']) / 1024.0,
+                        float(s['totalLength']) / 1024.0))
+            os.system(['clear', 'cls'][os.name == 'nt'])
+            print "%s complete, %s incomplete, %s error, %s skipped." % \
+                    (complete, incomplete, error, skipped.value), spinner[i % 4],
+            if state.value:
+                print "(scanning subreddits)"
+            else:
+                print ""
+            for k, v in subreddit_progress.items():
+                print '%s: Page %s' % (k, v)
+            print "\n".join(statuses)
+            i += 1
+        except:
+            time.sleep(1)
     return True
 
 
