@@ -1,222 +1,89 @@
-#!/usr/bin/python2
-# Reddit pics downloader
-from multiprocessing import Process, Pool, Manager
-from requests import get, TooManyRedirects
-from json import loads, dumps
-from os.path import exists, getsize, abspath
-from os import mkdir, utime
-from threading import Thread
-import os
-import time
-import re
-import sys
-import subprocess
-import xmlrpclib
+from twisted.internet import reactor
+from twisted.web.client import getPage, downloadPage
+from twisted.internet.defer import DeferredList
 
-class UsageError(Exception):
+import json
+
+
+def pageCallback(result):
+  return len(result)
+
+def processSubmission(child):
+    """Returns a deferred(?) that will either:
+        1. Download an image directly.
+        2. Scrape the page of a link (ie a tumblr).
+        3. Does nothing because it's not the kind of link we want.
+    """
+    
+    subreddit_name = "BLAH" #  Don't know how to pass this in!!
+    file_name = child['data']['url'].split('/')[-1]
+    d = downloadPage(child['data']['url'], '%s/%s'
+        % (subreddit_name, file_name))
+
+    return the_deferred
+
+def changeFileDate(result):
+    """Changes the file date on a downloaded file."""
+
+    # The date would be in child['data']['created'] but I'm not sure how to acc
+    # cess that here?
     pass
 
-
-class InvalidURLError(BaseException):
+def checkFileSize(result):
+    """Fail on files lower than a set size"""
     pass
 
-
-class ExistsError(Exception):
+def deleteFile(result):
+    """Delete the resulting file."""
     pass
-class State:
-    def __init__(self, value):
-        self.value = value
 
-def find_url(url):
-    if re.search(r"(jpg|png|jpeg|gif)$", url):
-        return url
-    else:
-        mo = re.search(r"http://imgur\.com/([a-zA-Z0-9]+)", url)
-        if mo != None:
-            return "http://i.imgur.com/%s.jpg" % mo.group(1)
-        else:
-            raise InvalidURLError
+def subredditCallback(result):
+    """Load x many pages of a subreddit and then do ??"""
+    data = json.loads(result)
 
+    count = 2  # no idea how get this from here?? needs to be next page count
+    previous_after = 'string'  # no idea how to get this either
 
-def get_urls(children):
-    urls = []
-    for sub in children:
-        url = sub['data']['url']
-        stamp = int(sub['data']['created'])
-        try:
-            xurl = find_url(url)
-            urls.append({
-                'href': xurl,
-                'time': stamp,
-                'subreddit': sub['data']['subreddit']
-            })
-        except InvalidURLError:
-            pass
-    return urls
+    dlist = []
+    if data['children']:
+        for child in data['children']:
+            d = processSubmission(child)
+            d.addCallback(checkFileSize)
+            d.addBoth(changeFileDate, deleteFile))
+            dlist.append(d)
 
+    # This is the stuff for getting the next page. I guess we do it recursivel
+    # y rather than iteratively because async?
+    if data['after'] != previous_after and count < max_count:
+        d = getPage('http://www.reddit.com/r/wallpapers/.json?count=%s&after=%s'
+            % (count, data['after']))
+        d.addCallback(subredditCallback)
+        dlist.append(d)
+    
+    return deferredList(dlist)
 
-def spider_subreddit(subreddit, pages, gids, skipped, subreddit_progress):
-    aria2 = xmlrpclib.ServerProxy('http://localhost:6800/rpc').aria2
-    after = None
-    for i in range(pages):
-        r = get('http://www.reddit.com/r/%s/.json?count=%s&after=%s' %
-            (subreddit, 25 * i, after))
-
-        j = loads(r.content)
-        if after == j['data']['after']:
-            break
-        after = j['data']['after']
-        urls = get_urls(j['data']['children'])
-
-        if subreddit != urls[0]['subreddit']:
-            subreddit = urls[0]['subreddit']
-        subreddit_progress[subreddit] = i + 1
-
-        for url in urls:
-            d = download_file(url, aria2, skipped)
-            if d:
-                gids.append(d)
-
-    subreddit_progress[subreddit] = '%s (Done)' % \
-        subreddit_progress[subreddit]
-
-    return gids
-
-def get_filename(url):
-    return "%s/%s" % (url['subreddit'], url['href'].split('/')[-1])
-
-def update_time(url):
-    utime(get_filename(url), (nows, url['time']))
-
-def download_file(url, aria2, skipped):
-    subreddit = url['subreddit']
-    try:
-        mkdir(subreddit)
-    except OSError:
-        pass
-    file_name = get_filename(url)
-    if file_name.split('/')[-1] == 'a.jpg':
-        return None
-    try:
-        if exists(file_name):
-            if not remove_broken_file(url):
-                raise ExistsError
-        gid = aria2.addUri([url['href']], {
-            'out': file_name
-        })
-        return gid
-    except ExistsError:
-        skipped.value += 1
-        return None
-
-def remove_broken_file(url):
-    file_name = get_filename(url)
-    if getsize(file_name) < 50:
-        os.remove(file_name)
-        return True
-    return False
+def finish(ign):
+  reactor.stop()
 
 def main():
-    try:
-        subreddits = sys.argv[1].split(',')
-        if subreddits[0] == '--help':
-            raise UsageError()
-    except (IndexError, UsageError):
-        print "Usage: subdown.py <subreddit[,subreddit]> [pages]"
-        exit()
-    try:
-        pages = int(sys.argv[2])
-    except IndexError:
-        print "Pages not specified, defaulting to one."
-        pages = 1
+    # only get 5 pages - I need to pass this into the scope of subredditCallbac
+    # k somehow, how should I do this?
+    max_count = 5
+                
+    subreddits = [
+        'wallpapers',
+        'pics'
+    ]
 
-    manager = Manager()
-
-    null = open(os.devnull, 'w')
-    p = subprocess.Popen([
-        'aria2c',
-        '--enable-rpc',
-        '--allow-overwrite',
-        '-j', '10',
-
-    ], stdout=null)
-    results = []
-    spiders = Pool(processes=5)
-
-    gids = manager.list()
-    skipped = manager.Value('i', 0)
-    subreddit_progress = manager.dict()
-    state = manager.Value('i', 1)
-
+    dlist = []
     for subreddit in subreddits:
-        result = spiders.apply_async(
-            spider_subreddit,
-            (subreddit, pages, gids, skipped,
-                subreddit_progress)
-        )
-        results.append(result)
+        d = getPage('http://www.reddit.com/r/%s/.json' % subreddit)
+        d.addCallback(subredditCallback)
+        dlist.append(d)
+    
+    d = deferredList(dlist)
+    d.addCallback(finish)
 
-    display = Thread(target=show_status, args=(
-        gids, state, skipped, subreddit_progress
-    ))
-    display.start()
-    for result in results:
-        try:
-            result.wait()
-        except KeyboardInterrupt:
-            sys.exit(1)
-    state.value = 0
-    display.join()
-    p.terminate()
-    null.close()
-
-def show_status(gids, state, skipped, subreddit_progress):
-    i = 0
-    spinner = ['-', '\\', '|', '/']
-    incomplete = 0
-    while incomplete > 0 or state.value == 1:
-        time.sleep(0.1)
-        statuses = []
-        incomplete = 0
-        complete = 0
-        error = 0
-        try:
-            s = xmlrpclib.ServerProxy('http://localhost:6800/rpc')
-            mc = xmlrpclib.MultiCall(s)
-            for gid in gids:
-                mc.aria2.tellStatus(gid)
-            r = mc()
-
-            for s in list(r):
-                uri = s['files'][0]['uris'][0]['uri']
-                if len(uri) > 28:
-                    uri = uri[:25] + '...'
-                if s['status'] == 'complete':
-                    complete += 1
-                elif s['status'] == 'error':
-                    error += 1
-                    statuses.append('%s: %s' % (uri, s['status']))
-                else:
-                    incomplete += 1
-                    statuses.append('%s: %s [%sKB/%sKB]' % (
-                        uri, s['status'],
-                        float(s['completedLength']) / 1024.0,
-                        float(s['totalLength']) / 1024.0))
-            os.system(['clear', 'cls'][os.name == 'nt'])
-            print "%s complete, %s incomplete, %s error, %s skipped." % \
-                    (complete, incomplete, error, skipped.value), spinner[i % 4],
-            if state.value:
-                print "(scanning subreddits)"
-            else:
-                print ""
-            for k, v in subreddit_progress.items():
-                print '%s: Page %s' % (k, v)
-            print "\n".join(statuses)
-            i += 1
-        except:
-            time.sleep(1)
-    return True
-
-
-if __name__ == '__main__':
+if __name__ == '__main__';
     main()
+    reactor.run()
