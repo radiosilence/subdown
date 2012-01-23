@@ -18,6 +18,7 @@ import json
 from twisted.internet import reactor
 from twisted.web.client import getPage, downloadPage
 from twisted.internet.defer import DeferredList
+import twisted
 
 class Submission(object):
     """Represents a single submission and provides associated processing
@@ -51,6 +52,11 @@ class Submission(object):
     def timestamp(self):
         """Submitted timestamp"""
         return self.data['created']
+    
+    @property
+    def tag(self):
+        """Tag for prefixing log entries"""
+        return '[%s:%s]' % (self.subreddit, self.file_name)
 
     @property
     def file_path(self):
@@ -66,19 +72,24 @@ class Submission(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
+        print self.tag, "Updating modified time to", self.timestamp
         os.utime(self.file_path, (0, self.timestamp))
 
     def checkFileSize(self):
         """Fail on files lower than a set size"""
-        print "checking file size", self.file_path
-        if os.path.getsize(self.file_path) < 20*1024:
+        min_size = 20*1024
+        print self.tag, "Checking file size"
+        if os.path.getsize(self.file_path) < min_size:
+            print self.tag, os.path.getsize(self.file_path), "<", min_size, "failed!"
             raise TooSmallError
 
     def deleteFile(self):
         """Delete the resulting file."""
-        failure.trap(TooSmallError)
-        print "deleting file", self.file_path
-        os.remove(self.file_path)
+        print self.tag, "Deleting file"
+        try:
+            os.remove(self.file_path)
+        except OSError:
+            pass
 
     def process(self):
         """Returns a deferred(?) that will either:
@@ -94,28 +105,40 @@ class Submission(object):
             except TooSmallError:
                 self.deleteFile()
 
+        def webErrback(failure):
+            failure.trap(twisted.web.error.Error)
+            print self.tag, "HTTP Error: %s (%s)" % (
+                failure.getErrorMessage(), self.url)
+
+        def partialDownloadErrback(failure):
+            print "XXXXXXXXXXXXXXXXXX"
+            print failure.getErrorMessage()
+            print "XXXXXXXXXXXXXXXXXXX"
+            failure.trap(twisted.web.client.PartialDownloadError)
+            print self.tag, "%s - Partially downloaded!" % self.url
+ 
         def writeError(failure):
             """If there's a problem writing the file for instance if the 
             directory does not exist.
             """
-
             failure.trap(IOError)
             print failure.getErrorMessage()
 
         def finishChild(result):
-            print "Finished child", self.subreddit, self.file_path, self.url
-
+            print self.tag, "Finished downloading",
+            
+        if self.ext in ['jpg', 'png', 'gif']:
+            d = downloadPage(str(self.url), self.file_path)
+        else:
+            raise UnknownLinkError(self.url)
         
         if os.path.exists(self.file_path):
             raise FileExistsError
 
         self.checkCreateDir()
 
-        if self.ext in ['jpg', 'png', 'gif']:
-            d = downloadPage(str(self.url), self.file_path)
-        else:
-            raise UnknownLinkError(self.url)
-
+        d.addErrback(webErrback)
+        d.addErrback(partialDownloadErrback)
         d.addCallback(processCallback, writeError)
         d.addBoth(finishChild)
         print "trying to download", str(self.url), self.file_path
@@ -157,20 +180,24 @@ def subredditCallback(page, subreddit, max_count, count=1, after=None):
         for child in data['children']:
             try:
                 submission = Submission(child, subreddit)
-                d = submission.process()
-                dlist.append(d)
-                print "Added ", submission.url
+                dlist.append(submission.process())
+                print submission.tag, "Added"
             except UnknownLinkError:
-                print "Didn't know how to handle link.", submission.url
+                print submission.tag, "Didn't know how to handle link.", submission.url
             except FileExistsError:
-                submission.updateModifiedTime()
-                print "File already exists.", submission.file_path
+                print submission.tag, "File already exists."
+                try:
+                    submission.checkFileSize()
+                    submission.updateModifiedTime()
+                except TooSmallError:
+                    submission.deleteFile()
 
     if data['after'] != previous_after and count < max_count:
         new_count = count + 1
 
         d = getPage(str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
             % (subreddit, new_count, data['after'])))
+        
         d.addCallback(subredditCallback,
             subreddit, max_count, new_count, data['after'])
         dlist.append(d)
@@ -179,6 +206,7 @@ def subredditCallback(page, subreddit, max_count, count=1, after=None):
 
 def finish(ign):
     print "Reached the finish!"
+    from time import sleep
     reactor.stop()
 
 def fail(failure):
