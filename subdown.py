@@ -7,6 +7,8 @@ images from specified subreddits.
 
 Future goals include the ability to visit linked pages and scrape for large
 images.
+
+It is also to aid me in learning best practices with the Twisted framework.
 """
 
 import os, sys
