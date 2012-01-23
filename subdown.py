@@ -91,7 +91,8 @@ class Submission(object):
         except OSError:
             pass
 
-    def process(self):
+    @property
+    def deferred(self):
         """Returns a deferred(?) that will either:
             1. Download an image directly.
             2. Scrape the page of a link (ie a tumblr).
@@ -111,9 +112,6 @@ class Submission(object):
                 failure.getErrorMessage(), self.url)
 
         def partialDownloadErrback(failure):
-            print "XXXXXXXXXXXXXXXXXX"
-            print failure.getErrorMessage()
-            print "XXXXXXXXXXXXXXXXXXX"
             failure.trap(twisted.web.client.PartialDownloadError)
             print self.tag, "%s - Partially downloaded!" % self.url
  
@@ -137,11 +135,11 @@ class Submission(object):
 
         self.checkCreateDir()
 
-        d.addErrback(webErrback)
         d.addErrback(partialDownloadErrback)
+        d.addErrback(webErrback)
         d.addCallbacks(processCallback, writeError)
         d.addBoth(finishChild)
-        print "trying to download", str(self.url), self.file_path
+        #print "trying to download", str(self.url), self.file_path
         self.d = d
         return d
 
@@ -168,59 +166,74 @@ class UsageError(Exception):
     pass
 
 
-def subredditCallback(page, subreddit, max_count, count=1, after=None):
-    """Load a page of a subreddit, download links, and recursively call self
-    on next page for as many pages as required."""
-    data = json.loads(page)['data']
-
-    previous_after = None  # no idea how to get this either
-
-    dlist = []
-    if data['children']:
-        for child in data['children']:
-            try:
-                submission = Submission(child, subreddit)
-                dlist.append(submission.process())
-                print submission.tag, "Added"
-            except UnknownLinkError:
-                print submission.tag, "Didn't know how to handle link.", submission.url
-            except FileExistsError:
-                print submission.tag, "File already exists."
-                try:
-                    submission.checkFileSize()
-                    submission.updateModifiedTime()
-                except TooSmallError:
-                    submission.deleteFile()
-
-    if data['after'] != previous_after and count < max_count:
-        new_count = count + 1
-
-        d = getPage(str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
-            % (subreddit, new_count, data['after'])))
-        
-        d.addCallback(subredditCallback,
-            subreddit, max_count, new_count, data['after'])
-        dlist.append(d)
+class SubredditPage(object):
+    def __init__(self, subreddit, max_count, count=1, after=None):
+        self.subreddit = subreddit
+        self.max_count = max_count
+        self.after = after
+        self.count = count
     
-    return DeferredList(dlist)
+    @property
+    def deferred(self):
+        d = getPage(str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
+            % (self.subreddit, self.count+1, self.after)))
+
+        d.addCallback(self.subredditCallback)
+        return d
+    
+
+    def subredditCallback(self, page):
+        """Load a page of a subreddit, download links, and recursively call self
+        on next page for as many pages as required."""
+        data = json.loads(page)['data']
+
+        previous_after = None  # no idea how to get this either
+
+        dlist = []
+        if data['children']:
+            for child in data['children']:
+                try:
+                    submission = Submission(child, self.subreddit)
+                    d = submission.deferred
+                    dlist.append(d)
+                    print submission.tag, "Added"
+                except UnknownLinkError:
+                    print submission.tag, "Didn't know how to handle link.", submission.url
+                except FileExistsError:
+                    print submission.tag, "File already exists."
+                    try:
+                        submission.checkFileSize()
+                        submission.updateModifiedTime()
+                    except TooSmallError:
+                        submission.deleteFile()
+
+
+        if data['after'] != previous_after and self.count < self.max_count:
+            sub = SubredditPage(self.subreddit, self.max_count, self.count + 1,
+            data['after'])
+            dlist.append(sub.deferred)
+
+        dl = DeferredList(dlist)
+        return dl
 
 def finish(ign):
     print "Reached the finish!"
     from time import sleep
     reactor.stop()
 
-def fail(failure):
-    print failure.getErrorMessage()
+
+def printpage(page):
+    print page[:255]
+    return page
 
 def main(subreddits, max_count):
     dlist = []
     for subreddit in subreddits:
-        d = getPage('http://www.reddit.com/r/%s/.json' % subreddit)
-        d.addCallback(subredditCallback, subreddit, max_count)
-        dlist.append(d)
-    
+        sub = SubredditPage(subreddit, max_count)
+        dlist.append(sub.deferred)
     d = DeferredList(dlist)
-    d.addCallbacks(finish, fail)
+
+    d.addCallback(finish)
 
 if __name__ == '__main__':
     try:
