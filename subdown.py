@@ -20,6 +20,9 @@ from twisted.web.client import getPage, downloadPage
 from twisted.internet.defer import DeferredList
 
 class Submission(object):
+    """Represents a single submission and provides associated processing
+    functions.
+    """
     def __init__(self, child, subreddit):
         self.data = child['data']
         self.subreddit = self.data['subreddit']
@@ -45,6 +48,11 @@ class Submission(object):
         return self.file_name.split('.')[-1]
     
     @property
+    def timestamp(self):
+        """Submitted timestamp"""
+        return self.data['created']
+
+    @property
     def file_path(self):
         """Returns the complete path and filename"""
         return '%s/%s' % (self.directory, self.file_name)
@@ -58,7 +66,7 @@ class Submission(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
-        os.utime(self.file_path, (0, self.data['created']))
+        os.utime(self.file_path, (0, self.timestamp))
 
     def checkFileSize(self):
         """Fail on files lower than a set size"""
