@@ -60,6 +60,18 @@ class Submission(object):
         """
         os.utime(self.file_path, (0, self.data['created']))
 
+    def checkFileSize(self):
+        """Fail on files lower than a set size"""
+        print "checking file size", self.file_path
+        if os.path.getsize(self.file_path) < 20*1024:
+            raise TooSmallError
+
+    def deleteFile(self):
+        """Delete the resulting file."""
+        failure.trap(TooSmallError)
+        print "deleting file", self.file_path
+        os.remove(self.file_path)
+
     def process(self):
         """Returns a deferred(?) that will either:
             1. Download an image directly.
@@ -67,21 +79,12 @@ class Submission(object):
             3. Does nothing because it's not the kind of link we want.
         """
 
-        def fileDateCallback(result):
-            """wraps update modified time"""
+        def processCallback(result):
             self.updateModifiedTime()
-
-        def checkFileSize(result):
-            """Fail on files lower than a set size"""
-            print "checking file size", self.file_path
-            if os.path.getsize(self.file_path) < 20*1024:
-                raise TooSmallError
-
-        def deleteFile(failure):
-            """Delete the resulting file."""
-            failure.trap(TooSmallError)
-            print "deleting file", self.file_path
-            os.remove(self.file_path)
+            try:
+                self.checkFileSize()
+            except TooSmallError:
+                self.deleteFile()
 
         def writeError(failure):
             """If there's a problem writing the file for instance if the 
@@ -104,10 +107,8 @@ class Submission(object):
             d = downloadPage(str(self.url), self.file_path)
         else:
             raise UnknownLinkError(self.url)
-        
-        d.addCallback(checkFileSize)
-        d.addCallbacks(fileDateCallback, deleteFile)
-        d.addErrback(writeError)
+
+        d.addCallback(processCallback, writeError)
         d.addBoth(finishChild)
         print "trying to download", str(self.url), self.file_path
         self.d = d
@@ -172,6 +173,9 @@ def finish(ign):
     print "Reached the finish!"
     reactor.stop()
 
+def fail(failure)
+    print failure.getErrorMessage()
+
 def main(subreddits, max_count):
     dlist = []
     for subreddit in subreddits:
@@ -180,7 +184,7 @@ def main(subreddits, max_count):
         dlist.append(d)
     
     d = DeferredList(dlist)
-    d.addCallback(finish)
+    d.addCallbacks(finish, fail)
 
 if __name__ == '__main__':
     try:
