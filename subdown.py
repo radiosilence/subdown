@@ -13,23 +13,39 @@ class Submission(object):
     
     @property
     def directory(self):
+        """Returns the directory without the filename"""
         return self.subreddit
 
     @property
     def url(self):
+        """Returns the URL"""
         return self.data['url']
 
     @property
     def file_name(self):
-        return self.data['url'].split('/')[-1]
+        """Returns file name without path"""
+        return self.url.split('/')[-1]
 
     @property
     def ext(self):
+        """Returns file extension"""
         return self.file_name.split('.')[-1]
     
     @property
     def file_path(self):
+        """Returns the complete path and filename"""
         return '%s/%s' % (self.directory, self.file_name)
+
+    def checkCreateDir(self):
+        """Checks if the directory exists, and if not, creates it"""
+        if not os.path.exists(self.directory):
+            os.makedirs(self.directory)
+
+    def updateModifiedTime(self):
+        """Changes the file date on a downloaded file to match that of the
+        submission
+        """
+        os.utime(self.file_path, (0, self.data['created']))
 
     def process(self):
         """Returns a deferred(?) that will either:
@@ -37,14 +53,15 @@ class Submission(object):
             2. Scrape the page of a link (ie a tumblr).
             3. Does nothing because it's not the kind of link we want.
         """
-        def changeFileDate(result):
-            """Changes the file date on a downloaded file."""
-            os.utime(self.file_path, (None, self.data['created']))
+
+        def fileDateCallback(result):
+            """wraps update modified time"""
+            self.updateModifiedTime()
 
         def checkFileSize(result):
             """Fail on files lower than a set size"""
             print "checking file size", self.file_path
-            if os.path.getsize(self.file_path) < 10*1000:
+            if os.path.getsize(self.file_path) < 20*1024:
                 raise TooSmallError
 
         def deleteFile(failure):
@@ -54,25 +71,33 @@ class Submission(object):
             os.remove(self.file_path)
 
         def writeError(failure):
-            print "YO GOT TO WRIE ERR"
+            """If there's a problem writing the file for instance if the 
+            directory does not exist.
+            """
+
             failure.trap(IOError)
             print failure.getErrorMessage()
 
         def finishChild(result):
             print "Finished child", self.subreddit, self.file_path, self.url
 
+        
+        if os.path.exists(self.file_path):
+            raise FileExistsError
+
+        self.checkCreateDir()
 
         if self.ext in ['jpg', 'png', 'gif']:
             d = downloadPage(str(self.url), self.file_path)
         else:
             raise UnknownLinkError(self.url)
-
+        
         d.addCallback(checkFileSize)
-        d.addCallbacks(changeFileDate, deleteFile)
+        d.addCallbacks(fileDateCallback, deleteFile)
         d.addErrback(writeError)
         d.addBoth(finishChild)
         print "trying to download", str(self.url), self.file_path
-
+        self.d = d
         return d
 
 class UnknownLinkError(Exception):
@@ -81,20 +106,25 @@ class UnknownLinkError(Exception):
     """
     pass
 
-
-class TooSmallError(Exception):
+class FileExistsError(Exception):
+    """This is an exception raised when the file that would be downloaded from
+    a submission is already on the disk.
+    """
     pass
 
 
-def pageCallback(result):
-  return len(result)
+class TooSmallError(Exception):
+    """Raised if the file is under 20Kb (so probably not a useful image."""
+    pass
 
 
-def subredditCallback(page, subreddit, max_count, count=1):
-    """Load x many pages of a subreddit and then do ??"""
+
+def subredditCallback(page, subreddit, max_count, count=1, after=None):
+    """Load a page of a subreddit, download links, and recursively call self
+    on next page for as many pages as required."""
     data = json.loads(page)['data']
 
-    previous_after = 'string'  # no idea how to get this either
+    previous_after = None  # no idea how to get this either
 
     dlist = []
     if data['children']:
@@ -103,20 +133,20 @@ def subredditCallback(page, subreddit, max_count, count=1):
                 submission = Submission(child, subreddit)
                 d = submission.process()
                 dlist.append(d)
+                print "Added ", submission.url
             except UnknownLinkError:
-                print "Didn't know how to handle link.", child['data']['url']
+                print "Didn't know how to handle link.", submission.url
+            except FileExistsError:
+                submission.updateModifiedTime()
+                print "File already exists.", submission.file_path
 
-    # This is the stuff for getting the next page. I guess we do it recursivel
-    # y rather than iteratively because async?
-    print subreddit, data['after'], previous_after, count, max_count
     if data['after'] != previous_after and count < max_count:
         new_count = count + 1
-        print "getting page", str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
-            % (subreddit, new_count, data['after']))
 
         d = getPage(str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
             % (subreddit, new_count, data['after'])))
-        d.addCallback(subredditCallback, subreddit, max_count, new_count)
+        d.addCallback(subredditCallback,
+            subreddit, max_count, new_count, data['after'])
         dlist.append(d)
     
     return DeferredList(dlist)
@@ -126,12 +156,12 @@ def finish(ign):
     reactor.stop()
 
 def main():
-    # only get 5 pages - I need to pass this into the scope of subredditCallbac
-    # k somehow, how should I do this?
-    max_count = 1
+    max_count = 10
                 
     subreddits = [
-        'wallpapeRs'
+        'bondage',
+        'shinyporn',
+        'wallpapers'
     ]
 
     dlist = []
