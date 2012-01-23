@@ -173,7 +173,7 @@ def finish(ign):
     print "Reached the finish!"
     reactor.stop()
 
-def fail(failure)
+def fail(failure):
     print failure.getErrorMessage()
 
 def main(subreddits, max_count):
