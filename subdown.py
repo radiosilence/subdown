@@ -1,4 +1,4 @@
-import os
+import os, sys
 
 import json
 
@@ -118,6 +118,10 @@ class TooSmallError(Exception):
     pass
 
 
+class UsageError(Exception):
+    """Raised if the command line is wrong"""
+    pass
+
 
 def subredditCallback(page, subreddit, max_count, count=1, after=None):
     """Load a page of a subreddit, download links, and recursively call self
@@ -155,15 +159,7 @@ def finish(ign):
     print "Reached the finish!"
     reactor.stop()
 
-def main():
-    max_count = 10
-                
-    subreddits = [
-        'bondage',
-        'shinyporn',
-        'wallpapers'
-    ]
-
+def main(subreddits, max_count):
     dlist = []
     for subreddit in subreddits:
         d = getPage('http://www.reddit.com/r/%s/.json' % subreddit)
@@ -174,5 +170,18 @@ def main():
     d.addCallback(finish)
 
 if __name__ == '__main__':
-    main()
+    try:
+        subreddits = sys.argv[1].split(',')
+        if subreddits[0] == '--help':
+            raise UsageError()
+    except (IndexError, UsageError):
+        print "Usage: subdown.py <subreddit[,subreddit]> [pages]"
+        exit()
+    try:
+        max_count = int(sys.argv[2])
+    except IndexError:
+        print "Pages not specified, defaulting to one."
+        max_count = 1
+
+    main(subreddits, max_count)
     reactor.run()
