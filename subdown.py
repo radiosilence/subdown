@@ -139,7 +139,7 @@ class Submission(object):
 
         d.addErrback(webErrback)
         d.addErrback(partialDownloadErrback)
-        d.addCallback(processCallback, writeError)
+        d.addCallbacks(processCallback, writeError)
         d.addBoth(finishChild)
         print "trying to download", str(self.url), self.file_path
         self.d = d
