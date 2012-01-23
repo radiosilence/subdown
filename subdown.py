@@ -1,3 +1,14 @@
+"""
+subdown.py
+==========
+
+This is a script that is made to quickly access the reddit API and download
+images from specified subreddits.
+
+Future goals include the ability to visit linked pages and scrape for large
+images.
+"""
+
 import os, sys
 
 import json
