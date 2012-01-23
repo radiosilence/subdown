@@ -1,7 +1,10 @@
+import os
+
+import json
+
 from twisted.internet import reactor
 from twisted.web.client import getPage, downloadPage
 from twisted.internet.defer import DeferredList
-import json
 
 class Submission(object):
     def __init__(self, child, subreddit):
@@ -36,20 +39,19 @@ class Submission(object):
         """
         def changeFileDate(result):
             """Changes the file date on a downloaded file."""
-            print "changing file date", self.file_path
-            # The date would be in child['data']['created'] but I'm not sure how to acc
-            # cess that here?
+            os.utime(self.file_path, (None, self.data['created']))
 
         def checkFileSize(result):
             """Fail on files lower than a set size"""
             print "checking file size", self.file_path
-            if 1 == 1:
+            if os.path.getsize(self.file_path) < 10*1000:
                 raise TooSmallError
 
         def deleteFile(failure):
             """Delete the resulting file."""
             failure.trap(TooSmallError)
             print "deleting file", self.file_path
+            os.remove(self.file_path)
 
         def writeError(failure):
             print "YO GOT TO WRIE ERR"
