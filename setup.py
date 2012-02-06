@@ -8,7 +8,7 @@ subdown.py is a tool for downloading images from reddit.
 from setuptools import setup, find_packages
 
 setup(
-    name='suave',
+    name='subdown.py',
     version='0.1',
     author='James Cleveland',
     author_email='jc@blackflags.co.uk',
