@@ -52,7 +52,7 @@ class Submission(object):
     @property
     def timestamp(self):
         """Submitted timestamp"""
-        return self.data['created']
+        return self.data['created_utc']
     
     @property
     def tag(self):
@@ -73,8 +73,9 @@ class Submission(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
-        print self.tag, "Updating modified time to", self.timestamp
-        os.utime(self.file_path, (0, self.timestamp))
+        timestamp = int(self.timestamp)
+        print self.tag, "Updating modified time to", timestamp
+        os.utime(self.file_path, (timestamp, timestamp))
 
     def checkFileSize(self):
         """Fail on files lower than a set size"""
