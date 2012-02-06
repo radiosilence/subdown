@@ -9,7 +9,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='suave',
-    version='.1',
+    version='0.1',
     author='James Cleveland',
     author_email='jc@blackflags.co.uk',
     packages=find_packages(),
@@ -20,5 +20,10 @@ setup(
     install_requires=open('requirements.txt').read().split("\n"),
     package_data={
         '': ['*.txt', '*.rst']
+    },
+    entry_points = {
+        'console_scripts': [
+            'subdown = subdown:main'
+        ],
     }
 )

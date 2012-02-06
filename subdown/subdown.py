@@ -228,16 +228,7 @@ def printpage(page):
     print page[:255]
     return page
 
-def main(subreddits, max_count):
-    dlist = []
-    for subreddit in subreddits:
-        sub = SubredditPage(subreddit, max_count)
-        dlist.append(sub.deferred)
-    d = DeferredList(dlist)
-
-    d.addCallback(finish)
-
-if __name__ == '__main__':
+def main():
     try:
         subreddits = sys.argv[1].split(',')
         if subreddits[0] == '--help':
@@ -251,5 +242,14 @@ if __name__ == '__main__':
         print "Pages not specified, defaulting to one."
         max_count = 1
 
-    main(subreddits, max_count)
+    dlist = []
+    for subreddit in subreddits:
+        sub = SubredditPage(subreddit, max_count)
+        dlist.append(sub.deferred)
+    d = DeferredList(dlist)
+
+    d.addCallback(finish)
     reactor.run()
+
+if __name__ == '__main__':
+    main()
