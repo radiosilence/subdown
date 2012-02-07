@@ -20,9 +20,10 @@ class Scraper(object):
 
 
 class ImgurScraper(Scraper):
-
+    """A scraper to get large images from Imgur"""
     @property
     def deferred(self):
+        """Returns the deferred for grabbing the HTML page"""
         url = re.sub(
             r'http://i\.imgur\.com/([a-zA-Z0-9]+)\.(jpg|jpeg|png|gif)',
             r'http://imgur.com/\1',
@@ -33,6 +34,7 @@ class ImgurScraper(Scraper):
         return d
 
     def scrape(self, page):
+        """Takes the HTML and returns a list of urls"""
         urls = []
         h = fromstring(page)
         s = CSSSelector('div.image img')
