@@ -22,13 +22,15 @@ import twisted
 
 from scrapers import *
 
+RETRIES = 5
+
 class Image(object):
     """This is an image. Most submissions will only have one image, but some
     may have many (due to scraping).
     """
     def __init__(self, url, submission, timestamp=None):
         self.submission = submission
-        self.url = url
+        self.url = str(url)
         if not timestamp:
             self.timestamp = self.submission.timestamp
         else:
@@ -69,13 +71,13 @@ class Image(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
-        print self.tag, "Updating modified time to", self.timestamp
+        # print self.tag, "Updating modified time to", self.timestamp
         os.utime(self.file_path, (self.timestamp, self.timestamp))
 
     def checkFileSize(self):
         """Fail on files lower than a set size"""
         min_size = 20*1024
-        print self.tag, "Checking file size"
+        # print self.tag, "Checking file size"
         if os.path.getsize(self.file_path) < min_size:
             print self.tag, os.path.getsize(self.file_path), "<", min_size, "failed!"
             raise TooSmallError
@@ -88,29 +90,45 @@ class Image(object):
         except OSError:
             pass
 
-    @property
-    def deferred(self):
+    def retrieve(self):
         """Returns a deferred(?) that will either:
             1. Download an image directly.
             2. Scrape the page of a link (ie a tumblr).
             3. Does nothing because it's not the kind of link we want.
         """
 
+        def retriedSuccess(result, retries):
+            print self.tag, 'Succeeded after %s attempts' % \
+                (RETRIES - retries + 1)
+            return retries
+
         def processCallback(result):
+            print self.tag, 'Processing',
             self.updateModifiedTime()
             try:
                 self.checkFileSize()
+                print '...saved'
             except TooSmallError:
                 self.deleteFile()
+                print '...deleted'
 
         def webErrback(failure):
             failure.trap(twisted.web.error.Error)
             print self.tag, "HTTP Error: %s (%s)" % (
                 failure.getErrorMessage(), self.url)
 
-        def partialDownloadErrback(failure):
+        def partialDownloadErrback(failure, retries):
+            print self.tag, "testing partialDownloadErrback"
             failure.trap(twisted.web.client.PartialDownloadError)
-            print self.tag, "%s - Partially downloaded!" % self.url
+            print "...trapped"
+            return downloadImage(retries-1)
+
+        def connectionLostErrback(failure, retries):
+            print self.tag, "testing ConnectionLostErrBack"
+            failure.trap(twisted.internet.error.ConnectionLost)
+            print "...trapped"
+            return downloadImage(retries-1)
+
  
         def writeError(failure):
             """If there's a problem writing the file for instance if the 
@@ -121,18 +139,34 @@ class Image(object):
 
         def finishChild(result):
             print self.tag, "Finished downloading"
+            print result
+            return result
+
+        def failedChild(failure):
+            print self.tag, "Failed to download.", failure.getErrorMessage()
             
-        d = downloadPage(str(self.url), self.file_path)
+        def downloadImage(retries=RETRIES):
+            self.deleteFile()
+            print self.tag, "Attempt #%s" % (RETRIES-retries+1)
+            d = downloadPage(self.url, self.file_path)
+
+            d.addCallbacks(processCallback, writeError)
+
+            if retries < RETRIES:
+                d.addCallback(retriedSuccess, retries)
+
+            d.addErrback(partialDownloadErrback, retries)
+            d.addErrback(connectionLostErrback, retries)
+            d.addErrback(webErrback)
+            d.addCallbacks(finishChild, failedChild)
+            return d
         
         if os.path.exists(self.file_path):
             raise FileExistsError
 
         self.checkCreateDir()
 
-        d.addErrback(partialDownloadErrback)
-        d.addErrback(webErrback)
-        d.addCallbacks(processCallback, writeError)
-        d.addBoth(finishChild)
+        d = downloadImage()
         #print "trying to download", str(self.url), self.file_path
         self.d = d
         return d
@@ -172,7 +206,7 @@ class Submission(object):
         deferreds = []
         for image in [Image(url, self) for url in image_urls]:
             try:
-                deferreds.append(image.deferred)
+                deferreds.append(image.retrieve())
             except FileExistsError:
                 print image.tag, "File already exists."
                 try:
@@ -182,13 +216,12 @@ class Submission(object):
                     image.deleteFile()
         return deferreds
 
-    @property
-    def deferred(self):
+    def retrieve(self):
         deferreds = []
         if re.search(r'imgur\.com', self.url):
-            scraper = ImgurScraper(self.url, self).deferred
-            scraper.addCallback(self.process_images)
-            deferreds.append(scraper)
+            scraper_deferred = ImgurScraper(self.url, self).retrieve()
+            scraper_deferred.addCallback(self.process_images)
+            deferreds.append(scraper_deferred)
         elif self.ext in ['jpg', 'png', 'gif']:
             raise UnknownLinkError(self.url)
             self.images.append(Image(self.url, self))
@@ -232,8 +265,7 @@ class SubredditPage(object):
         self.after = after
         self.count = count
     
-    @property
-    def deferred(self):
+    def retrieve(self):
         d = getPage(str('http://www.reddit.com/r/%s/.json?count=%s&after=%s'
             % (self.subreddit, self.count+1, self.after)))
 
@@ -253,7 +285,7 @@ class SubredditPage(object):
             for child in data['children']:
                 try:
                     submission = Submission(child, self.subreddit)
-                    dlist.append(submission.deferred)
+                    dlist.append(submission.retrieve())
                     print submission.tag, "Added"
                 except UnknownLinkError:
                     print submission.tag, "Unknown Link", submission.url
@@ -261,7 +293,7 @@ class SubredditPage(object):
         if data['after'] != previous_after and self.count < self.max_count:
             sub = SubredditPage(self.subreddit, self.max_count, self.count + 1,
             data['after'])
-            dlist.append(sub.deferred)
+            dlist.append(sub.retrieve())
 
         return DeferredList(dlist)
 
@@ -292,7 +324,7 @@ def main():
     dlist = []
     for subreddit in subreddits:
         sub = SubredditPage(subreddit, max_count)
-        dlist.append(sub.deferred)
+        dlist.append(sub.retrieve())
     d = DeferredList(dlist)
 
     d.addCallback(finish)

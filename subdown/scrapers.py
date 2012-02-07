@@ -3,6 +3,7 @@ it into a list of image URLs, through a series of confusing and weird
 callbacks.
 """
 
+import json
 import re
 
 from twisted.web.client import getPage
@@ -21,11 +22,11 @@ class Scraper(object):
 
 class ImgurScraper(Scraper):
     """A scraper to get large images from Imgur"""
-    @property
-    def deferred(self):
+
+    def retrieve(self):
         """Returns the deferred for grabbing the HTML page"""
         url = re.sub(
-            r'http://i\.imgur\.com/([a-zA-Z0-9]+)\.(jpg|jpeg|png|gif)',
+            r'http://i?\.?imgur\.com/([a-zA-Z0-9]+)\.(jpg|jpeg|png|gif)',
             r'http://imgur.com/\1',
             self._url)
         self._url = url
@@ -38,12 +39,32 @@ class ImgurScraper(Scraper):
         urls = []
         h = fromstring(page)
         s = CSSSelector('div.image img')
-        urls = [el.attrib['src'] for el in s(h)]
-        print "searched %s found " % self._url, urls
+        for el in s(h):
+            try:
+                urls.append(el.attrib['src'])
+            except KeyError:
+                try:
+                    urls.append(el.attrib['data-src'])
+                except KeyError:
+                    pass
+        
+        s = CSSSelector('a.zoom')
+        for el in s(h):
+            try:
+                url = el.attrib['href']
+                if url not in urls:
+                    urls.append(url)
+            except KeyError:
+                pass
+        """jsons = re.search(r'images: (.*),', page).group(1)
+        data = json.loads(jsons)
+        for image in data['items']:
+            urls.append('http://i.imgur.com/%s%s' % (image['hash'], image['ext']))
+        """
+        #print "searched %s found " % self._url, urls
         return urls
 
 class TumblrScraper(Scraper):
 
-    @property
-    def deferred(self):
+    def retrieve(self):
         return []
