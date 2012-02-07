@@ -13,6 +13,7 @@ It is also to aid me in learning best practices with the Twisted framework.
 
 import os, sys
 import json
+import re
 
 from twisted.internet import reactor
 from twisted.web.client import getPage, downloadPage
@@ -167,18 +168,9 @@ class Submission(object):
         """Submitted timestamp"""
         return float(self.data['created_utc'])
 
-    @property
-    def deferred(self):
-
-        if re.search('imgur\.com', self.url):
-            self.images = [Image(url, self) for url in ImgurScraper(self.url)]
-        elif self.ext in ['jpg', 'png', 'gif']:
-            self.images.append(Image(self.url, self))
-        else:
-            raise UnknownLinkError(self.url)
-
+    def process_images(self, image_urls):
         deferreds = []
-        for image in self.images:
+        for image in [Image(url, self) for url in image_urls]:
             try:
                 deferreds.append(image.deferred)
             except FileExistsError:
@@ -188,7 +180,22 @@ class Submission(object):
                     image.updateModifiedTime()
                 except TooSmallError:
                     image.deleteFile()
-    
+        return deferreds
+
+    @property
+    def deferred(self):
+        deferreds = []
+        if re.search(r'imgur\.com', self.url):
+            scraper = ImgurScraper(self.url, self).deferred
+            scraper.addCallback(self.process_images)
+            deferreds.append(scraper)
+        elif self.ext in ['jpg', 'png', 'gif']:
+            raise UnknownLinkError(self.url)
+            self.images.append(Image(self.url, self))
+        else:
+            raise UnknownLinkError(self.url)
+
+        deferreds.extend(self.process_images(self.images))
         return DeferredList(deferreds)
 
     def __unicode__(self):
