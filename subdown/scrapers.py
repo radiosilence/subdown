@@ -10,8 +10,6 @@ from twisted.web.client import getPage
 from lxml.html import fromstring
 from lxml.cssselect import CSSSelector
 
-from utils import decode
-
 
 class Scraper(object):
     urls = []
