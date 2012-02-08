@@ -1,1 +1,3 @@
 twisted
+pyopenssl
+lxml
