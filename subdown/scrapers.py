@@ -10,15 +10,14 @@ from twisted.web.client import getPage
 from lxml.html import fromstring
 from lxml.cssselect import CSSSelector
 
+from utils import decode
+
 
 class Scraper(object):
     urls = []
-    submission = None
 
-    def __init__(self, url, submission=None):
+    def __init__(self, url):
         self._url = str(url)
-        self.submission = submission
-
 
 class ImgurScraper(Scraper):
     """A scraper to get large images from Imgur"""
@@ -67,4 +66,24 @@ class ImgurScraper(Scraper):
 class TumblrScraper(Scraper):
 
     def retrieve(self):
-        return []
+        d = getPage(self._url)
+        d.addCallback(self.scrape)
+        return d
+    
+    def scrape(self, page):
+        """Takes the HTML and returns a list of urls"""
+        urls = []
+        h = fromstring(page)
+        s = CSSSelector('div#content img')
+        for el in s(h):
+            try:
+                print el.attrib
+                url = el.attrib['src']
+                if url not in urls:
+                    urls.append(url)
+            except KeyError:
+                try:
+                    urls.append(el.attrib['data-src'])
+                except KeyError:
+                    pass
+        return urls

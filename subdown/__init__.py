@@ -15,6 +15,8 @@ import os, sys
 import json
 import re
 
+from datetime import datetime
+
 from twisted.internet import reactor
 from twisted.web.client import getPage, downloadPage
 from twisted.internet.defer import DeferredList, Deferred
@@ -22,6 +24,7 @@ from twisted.python import log
 import twisted
 
 from scrapers import *
+from utils import decode
 
 RETRIES = 5
 
@@ -57,7 +60,7 @@ class Image(object):
     def tag(self):
         """Tag for prefixing log entries"""
         return '[%s:%s:%s]' % (self.submission.subreddit,
-            unicode(self.submission).replace(' ', '')[:10], self.file_name)
+            unicode(self.submission).replace(' ', ''), self.file_name)
 
     @property
     def file_path(self):
@@ -73,7 +76,10 @@ class Image(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
-        print self.tag, "Updating modified time to", self.timestamp
+        dt = datetime.fromtimestamp(self.timestamp)
+        print self.tag, "Updating modified time to %s" % dt.strftime(
+            '%A, %d. %B %Y %I:%M%p'
+        )
         os.utime(self.file_path, (self.timestamp, self.timestamp))
 
     def checkFileSize(self):
@@ -110,6 +116,7 @@ class Image(object):
         def partialDownloadErrback(failure, retries):
             failure.trap(twisted.web.client.PartialDownloadError)
             if retries > 0:
+                print self.tag, "Partial download, retrying"
                 return downloadImage(retries-1)
             else:
                 raise MaxRetriesExceededError(
@@ -118,10 +125,20 @@ class Image(object):
         def connectionLostErrback(failure, retries):
             failure.trap(twisted.internet.error.ConnectionLost)
             if retries > 0:
+                print self.tag, "Connection lost, retrying"
                 return downloadImage(retries-1)
             else:
                 raise MaxRetriesExceededError(
                     "Connection lost (max retries exceeded)")
+
+        def userTimeoutErrback(failure, retries):
+            failure.trap(twisted.internet.error.TimeoutError)
+            if retries > 0:
+                print self.tag, "User timeout, retrying"
+                return downloadImage(retries-1)
+            else:
+                raise MaxRetriesExceededError(
+                    "User timeout (max retries exceeded)")
  
         def downloaded(result, retries):
             retries = RETRIES - retries
@@ -137,21 +154,29 @@ class Image(object):
         
 
         def failed(failure):
-            print self.tag, "Failed:", failure.getErrorMessage()
+            failure.trap(twisted.web.error.Error, MaxRetriesExceededError)
+            print self.tag, "Failure - ", failure.getErrorMessage()
+            self.deleteFile()
             self.deferred.callback(False)
             
+
+        def fakeFail(result):
+            raise twisted.internet.error.TimeoutError
+
         def downloadImage(retries=RETRIES):
             d = downloadPage(self.url, self.file_path)
             d.addCallback(processCallback)
             d.addCallback(downloaded, retries)
 
-
             d.addErrback(partialDownloadErrback, retries)
             d.addErrback(connectionLostErrback, retries)
+            d.addErrback(userTimeoutErrback, retries)
             d.addErrback(failed)
 
             return d
 
+        def done(result):
+            self.deferred.callback(0)
 
         if os.path.exists(self.file_path):
             raise FileExistsError
@@ -185,9 +210,10 @@ class Submission(object):
     @property
     def tag(self):
         """Tag for prefixing log entries"""
-        return '[%s:%s]' % (self.subreddit,
-            unicode(self).replace(' ', '')[:10])
 
+        return '[%s:%s]' % (self.subreddit,
+            unicode(self).replace(' ', ''))
+    
     @property
     def timestamp(self):
         """Submitted timestamp"""
@@ -204,7 +230,10 @@ class Submission(object):
                 d = image.retrieve()
                 self.image_deferreds.append(d)
             except FileExistsError:
-                print image.tag, "File already exists."
+                try:
+                    print image.tag, 'File exists'
+                except UnicodeEncodeError:
+                    print repr(image.tag), 'File exists WTFENC'
                 try:
                     image.checkFileSize()
                     image.updateModifiedTime()
@@ -215,29 +244,34 @@ class Submission(object):
         def done(result):
             self.deferred.callback(0)
 
-        def imagesCollected(result):
+        def imagesCollected(result=None):
             self.processImages()
             dl = DeferredList(self.image_deferreds)
             dl.addCallback(done)
 
         deferreds = []
         if re.search(r'imgur\.com', self.url):
-            scraper_deferred = ImgurScraper(self.url, self).retrieve()
+            # If it's an imageur link, scrape incase it's an album.
+            scraper_deferred = ImgurScraper(self.url).retrieve()
             scraper_deferred.addCallback(self.addImages)
             scraper_deferred.addCallback(imagesCollected)
-
             deferreds.append(scraper_deferred)
         elif self.ext in ['jpg', 'png', 'gif']:
-            raise UnknownLinkError(self.url)
-            self.images.append(self.url)
-            imagesCollecteds()
+            # If we don't have a scraper but it's got the right extension, give
+            # it a shot.
+            self.images.append(Image(self.url, self))
+            imagesCollected()
         else:
+            # If we have no idea what it is, ditch it.
             raise UnknownLinkError(self.url)
 
         return self.deferred
 
     def __unicode__(self):
-        return self.data['title']
+        try:
+            return self.data['title'].decode('utf-8', 'replace')[:10]
+        except UnicodeEncodeError:
+            return self.data['title'][:10]
 
 
 class MaxRetriesExceededError(Exception):
