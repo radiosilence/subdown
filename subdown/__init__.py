@@ -17,7 +17,8 @@ import re
 
 from twisted.internet import reactor
 from twisted.web.client import getPage, downloadPage
-from twisted.internet.defer import DeferredList
+from twisted.internet.defer import DeferredList, Deferred
+from twisted.python import log
 import twisted
 
 from scrapers import *
@@ -31,6 +32,7 @@ class Image(object):
     def __init__(self, url, submission, timestamp=None):
         self.submission = submission
         self.url = str(url)
+        self.deferred = Deferred()
         if not timestamp:
             self.timestamp = self.submission.timestamp
         else:
@@ -55,7 +57,7 @@ class Image(object):
     def tag(self):
         """Tag for prefixing log entries"""
         return '[%s:%s:%s]' % (self.submission.subreddit,
-            unicode(self.submission)[:15], self.file_name)
+            unicode(self.submission).replace(' ', '')[:10], self.file_name)
 
     @property
     def file_path(self):
@@ -71,7 +73,7 @@ class Image(object):
         """Changes the file date on a downloaded file to match that of the
         submission
         """
-        # print self.tag, "Updating modified time to", self.timestamp
+        print self.tag, "Updating modified time to", self.timestamp
         os.utime(self.file_path, (self.timestamp, self.timestamp))
 
     def checkFileSize(self):
@@ -97,79 +99,66 @@ class Image(object):
             3. Does nothing because it's not the kind of link we want.
         """
 
-        def retriedSuccess(result, retries):
-            print self.tag, 'Succeeded after %s attempts' % \
-                (RETRIES - retries + 1)
-            return retries
-
         def processCallback(result):
-            print self.tag, 'Processing',
             self.updateModifiedTime()
             try:
                 self.checkFileSize()
-                print '...saved'
             except TooSmallError:
                 self.deleteFile()
-                print '...deleted'
-
-        def webErrback(failure):
-            failure.trap(twisted.web.error.Error)
-            print self.tag, "HTTP Error: %s (%s)" % (
-                failure.getErrorMessage(), self.url)
-
-        def partialDownloadErrback(failure, retries):
-            print self.tag, "testing partialDownloadErrback"
-            failure.trap(twisted.web.client.PartialDownloadError)
-            print "...trapped"
-            return downloadImage(retries-1)
-
-        def connectionLostErrback(failure, retries):
-            print self.tag, "testing ConnectionLostErrBack"
-            failure.trap(twisted.internet.error.ConnectionLost)
-            print "...trapped"
-            return downloadImage(retries-1)
-
- 
-        def writeError(failure):
-            """If there's a problem writing the file for instance if the 
-            directory does not exist.
-            """
-            failure.trap(IOError)
-            print failure.getErrorMessage()
-
-        def finishChild(result):
-            print self.tag, "Finished downloading"
-            print result
             return result
 
-        def failedChild(failure):
-            print self.tag, "Failed to download.", failure.getErrorMessage()
+        def partialDownloadErrback(failure, retries):
+            failure.trap(twisted.web.client.PartialDownloadError)
+            if retries > 0:
+                return downloadImage(retries-1)
+            else:
+                raise MaxRetriesExceededError(
+                    "Partial download (max retries exceeded)")
+
+        def connectionLostErrback(failure, retries):
+            failure.trap(twisted.internet.error.ConnectionLost)
+            if retries > 0:
+                return downloadImage(retries-1)
+            else:
+                raise MaxRetriesExceededError(
+                    "Connection lost (max retries exceeded)")
+ 
+        def downloaded(result, retries):
+            retries = RETRIES - retries
+            print self.tag, "Image downloaded", 
+            if retries == 1:
+                print "after %s retry." % retries
+            elif retries > 1:
+                print "after %s retries." % retries
+            else:
+                print "on first try."
+            
+            self.deferred.callback(True)
+        
+
+        def failed(failure):
+            print self.tag, "Failed:", failure.getErrorMessage()
+            self.deferred.callback(False)
             
         def downloadImage(retries=RETRIES):
-            self.deleteFile()
-            print self.tag, "Attempt #%s" % (RETRIES-retries+1)
             d = downloadPage(self.url, self.file_path)
+            d.addCallback(processCallback)
+            d.addCallback(downloaded, retries)
 
-            d.addCallbacks(processCallback, writeError)
-
-            if retries < RETRIES:
-                d.addCallback(retriedSuccess, retries)
 
             d.addErrback(partialDownloadErrback, retries)
             d.addErrback(connectionLostErrback, retries)
-            d.addErrback(webErrback)
-            d.addCallbacks(finishChild, failedChild)
+            d.addErrback(failed)
+
             return d
-        
+
+
         if os.path.exists(self.file_path):
             raise FileExistsError
 
         self.checkCreateDir()
-
-        d = downloadImage()
-        #print "trying to download", str(self.url), self.file_path
-        self.d = d
-        return d
+        downloadImage()
+        return self.deferred
 
 class Submission(object):
     """Represents a single submission and provides associated processing
@@ -179,6 +168,8 @@ class Submission(object):
         self.data = child['data']
         self.subreddit = self.data['subreddit']
         self.images = []
+        self.deferred = Deferred()
+        self.image_deferreds = []
 
     @property
     def url(self):
@@ -195,18 +186,23 @@ class Submission(object):
     def tag(self):
         """Tag for prefixing log entries"""
         return '[%s:%s]' % (self.subreddit,
-            unicode(self)[:15])
+            unicode(self).replace(' ', '')[:10])
 
     @property
     def timestamp(self):
         """Submitted timestamp"""
         return float(self.data['created_utc'])
 
-    def process_images(self, image_urls):
-        deferreds = []
-        for image in [Image(url, self) for url in image_urls]:
+
+    def addImages(self, urls):
+        for url in urls:
+            self.images.append(Image(url, self))
+
+    def processImages(self):
+        for image in self.images:
             try:
-                deferreds.append(image.retrieve())
+                d = image.retrieve()
+                self.image_deferreds.append(d)
             except FileExistsError:
                 print image.tag, "File already exists."
                 try:
@@ -214,26 +210,41 @@ class Submission(object):
                     image.updateModifiedTime()
                 except TooSmallError:
                     image.deleteFile()
-        return deferreds
 
     def retrieve(self):
+        def done(result):
+            self.deferred.callback(0)
+
+        def imagesCollected(result):
+            self.processImages()
+            dl = DeferredList(self.image_deferreds)
+            dl.addCallback(done)
+
         deferreds = []
         if re.search(r'imgur\.com', self.url):
             scraper_deferred = ImgurScraper(self.url, self).retrieve()
-            scraper_deferred.addCallback(self.process_images)
+            scraper_deferred.addCallback(self.addImages)
+            scraper_deferred.addCallback(imagesCollected)
+
             deferreds.append(scraper_deferred)
         elif self.ext in ['jpg', 'png', 'gif']:
             raise UnknownLinkError(self.url)
-            self.images.append(Image(self.url, self))
+            self.images.append(self.url)
+            imagesCollecteds()
         else:
             raise UnknownLinkError(self.url)
 
-        deferreds.extend(self.process_images(self.images))
-        return DeferredList(deferreds)
+        return self.deferred
 
     def __unicode__(self):
         return self.data['title']
 
+
+class MaxRetriesExceededError(Exception):
+    """This is thrown when something tries to download but reaches the set
+    allowed amount of retries.
+    """
+    pass
 
 class UnknownLinkError(Exception):
     """This error is thrown when the program does not know what to do with a
@@ -297,15 +308,16 @@ class SubredditPage(object):
 
         return DeferredList(dlist)
 
-def finish(ign):
-    print "Reached the finish!"
-    from time import sleep
+def finish(result):
+    print """Finished!"""
+    #from time import sleep
     reactor.stop()
 
+def failed(failure):
+    print "======================================+++++++"
+    print failure.getErrorMessage()
+    print "======================================+++++++"
 
-def printpage(page):
-    print page[:255]
-    return page
 
 def main():
     try:
@@ -328,4 +340,5 @@ def main():
     d = DeferredList(dlist)
 
     d.addCallback(finish)
+    d.addErrback(failed)
     reactor.run()
