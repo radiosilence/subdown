@@ -24,7 +24,6 @@ from twisted.python import log
 import twisted
 
 from scrapers import *
-from utils import decode
 
 RETRIES = 5
 
