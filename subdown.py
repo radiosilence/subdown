@@ -30,31 +30,28 @@ def get_page(subreddit, page, after):
         data = json.loads(result.content)['data']
     except:
         raise Exception('404 Not Found')
-    return data['children'], data['after']
+    return data['children'], result.encoding, data['after']
 
 def get_subreddit(subreddit, max_count, count=0, after=None):
     while count < max_count:
         quote = colored.yellow('[{}/{}] '.format(count + 1, max_count))
         with indent(len(quote), quote=quote):
-            children, after = get_page(subreddit, count, after)
-            download_children(children)
+            children, encoding, after = get_page(subreddit, count, after)
+            download_children(children, encoding)
         count += 1
 
-def download_children(children):
+def download_children(children, encoding):
     def valid(child):
         return True
 
     puts("Downloading children")
     for child in filter(valid, children):
         url = child['data']['url']
-        quote = u'{} '.format(unicode(url)).encode('utf-8')
-        if len(quote) > 30:
-            quote = u'{}... '.format(quote[:19])
-        with indent(len(quote), quote=quote):
-            puts("Downloading")
+        filename = url.split('/')[-1].split('?')[0]
+        puts(u'Downloading {}'.format(filename).encode(encoding))
 if __name__ == '__main__':
     for subreddit in subreddits:
-        quote = colored.magenta(' -> {}'.format(subreddit))
+        quote = ' -> {} '.format(subreddit)
         with indent(len(quote), quote=quote):
             try:
                 get_subreddit(subreddit, max_count)
