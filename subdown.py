@@ -10,13 +10,35 @@ import simplejson as json
 import requests
 import mimetypes
 
+from docopt import docopt
 from clint.textui import puts, indent, colored
 
 import gevent
 from gevent import monkey; monkey.patch_socket()
 
-subreddits = ['HistoryPorn', 'bondage']
-max_count = 20
+NAME = 'subdown'
+VERSION = '0.2'
+AUTHOR = 'James Cleveland'
+SHORT_DESC = 'subreddit image scraper'
+
+__doc__ = """{2}
+
+Usage:
+    {0} [options] <subreddit> [<subreddit>...]
+    {0} -h | --help
+    {0} --version
+
+Options:
+    -h --help                   Show this screen.
+    --version                   Show version.
+    -p --pages=COUNT            Number of pages to grab [default: 1].
+    -t --timeout=SECONDS        Timeout for individual images [default: 5].
+    -T --page-timeout=SECONDS   Timeout for subreddit pages [default: 20].
+""".format(
+    NAME,
+    VERSION,
+    SHORT_DESC
+)
 
 TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
 
@@ -46,17 +68,19 @@ def fix_url(url):
         return url
 
 
-def get_subreddit(subreddit, max_count, count=0, after=None):
+def get_subreddit(subreddit, max_count, timeout, page_timeout):
+    count = 0
+    after = None
     while count < max_count:
         children, encoding, after = get_page(subreddit, count, after,
-            max_count)
-        download_children(children, encoding)
+            max_count, page_timeout)
+        download_children(subreddit, children, encoding, timeout, page_timeout)
         count += 1
 
 
-def get_page(subreddit, count, after, max_count):
+def get_page(subreddit, count, after, max_count, page_timeout):
     url = TEMPLATE.format(subreddit, count, after)
-    result = requests.get(url, timeout=2)
+    result = requests.get(url, timeout=page_timeout)
     puts('{} {} (Page {} of {})'.format(colored.green('==>'), subreddit,
         count + 1, max_count))
     try:
@@ -68,12 +92,13 @@ def get_page(subreddit, count, after, max_count):
     return data['children'], result.encoding, data['after']
 
 
-def download_children(children, encoding):
+def download_children(subreddit, children, encoding, timeout, page_timeout):
     def valid(child):
         exts = ('jpg', 'jpeg', 'png', 'gif')
         return url_filename(child['data']['url']).split('.')[-1] in exts
     jobs = []
     quote = '  {} '.format(colored.blue('->'))
+
     with indent(len(quote), quote=quote):
         for child in filter(valid, children):
             url = child['data']['url']
@@ -84,9 +109,13 @@ def download_children(children, encoding):
                 datetime.datetime.fromtimestamp(child['data']['created']),
                 subreddit
             )
-            jobs.append(gevent.spawn(download_submission, submission))
+            jobs.append(gevent.spawn(
+                download_submission,
+                submission,
+                timeout
+            ))
 
-        gevent.joinall(jobs, timeout=10)
+        gevent.joinall(jobs, timeout=page_timeout)
         for job in jobs:
             if not job.value:
                 puts(colored.red('Timed out {}'.format(
@@ -94,12 +123,7 @@ def download_children(children, encoding):
                 job.kill()
 
 
-def set_utime(path, created):
-    timestamp = time.mktime(created.timetuple())
-    os.utime(path, (timestamp, timestamp))
-
-
-def download_submission(s):
+def download_submission(s, timeout):
     path = '{}/{}'.format(
         s.subreddit,
         s.filename
@@ -114,7 +138,7 @@ def download_submission(s):
 
     puts('Adding {}'.format(path))
     try:
-        r = requests.get(s.url, timeout=5)
+        r = requests.get(s.url, timeout=timeout)
     except Exception as e:
         puts(colored.red('Error: {} <{}>'.format(
             path,
@@ -129,13 +153,35 @@ def download_submission(s):
     return True
 
 
+def set_utime(path, created):
+    timestamp = time.mktime(created.timetuple())
+    os.utime(path, (timestamp, timestamp))
+
+
 def fix_subreddit_name(subreddit):
     url = TEMPLATE.format(subreddit, '', '')
     return json.loads(
         requests.get(url).content)['data']['children'][0]['data']['subreddit']
 
 
-if __name__ == '__main__':
+def subdown(args):
+    def coerce_or_die(args, arg, f=int):
+        try:
+            try:
+                val = f(args[arg])
+                if val < 0:
+                    raise Exception('{} must be positive.'.format(arg))
+                return val
+            except ValueError:
+                raise Exception('{} must be coercable to {}.'.format(arg, f))
+        except Exception as e:
+            puts(colored.red(str(e)))
+            sys.exit(1)
+    
+    timeout = coerce_or_die(args, '--timeout', f=float)
+    page_timeout = coerce_or_die(args, '--page-timeout', f=float)
+    max_count = coerce_or_die(args, '--pages')
+    subreddits = args['<subreddit>']
     for subreddit in subreddits:
         try:
             subreddit = fix_subreddit_name(subreddit)
@@ -143,12 +189,14 @@ if __name__ == '__main__':
             puts(colored.red('Failed to load subreddit {}'.format(subreddit)))
             continue
         try:
-            get_subreddit(subreddit, max_count)
+            get_subreddit(subreddit, max_count, timeout, page_timeout)
         except Exception as e:
             raise
             puts(colored.red(str(e)))
 
-# urls = [url.format(port) for port in [8051, 8052]]
-# jobs = [gevent.spawn(requests.get, url) for url in urls]
-# gevent.joinall(jobs, timeout=4)
-# print [job.value for job in jobs]
+
+if __name__ == '__main__':
+    args = docopt(__doc__, version='{} {}'.format(
+        NAME,
+        VERSION))
+    subdown(args)
