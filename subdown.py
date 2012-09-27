@@ -46,6 +46,14 @@ def fix_url(url):
         return url
 
 
+def get_subreddit(subreddit, max_count, count=0, after=None):
+    while count < max_count:
+        children, encoding, after = get_page(subreddit, count, after,
+            max_count)
+        download_children(children, encoding)
+        count += 1
+
+
 def get_page(subreddit, count, after, max_count):
     url = TEMPLATE.format(subreddit, count, after)
     result = requests.get(url, timeout=2)
@@ -58,14 +66,6 @@ def get_page(subreddit, count, after, max_count):
     except:
         raise Exception('404 Not Found')
     return data['children'], result.encoding, data['after']
-
-
-def get_subreddit(subreddit, max_count, count=0, after=None):
-    while count < max_count:
-        children, encoding, after = get_page(subreddit, count, after,
-            max_count)
-        download_children(children, encoding)
-        count += 1
 
 
 def download_children(children, encoding):
