@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 import datetime
+import re
 from collections import namedtuple
 import os, time
 import simplejson as json
@@ -9,7 +10,6 @@ import requests
 from clint.textui import puts, indent, colored
 
 import gevent
-from gevent import socket
 from gevent import monkey; monkey.patch_socket()
 
 subreddits = ['HistoryPorn', 'bondage']
@@ -21,6 +21,15 @@ Submission = namedtuple('Submission', 'url filename created encoding')
 
 #url = 'http://localhost:{}'
 
+def url_filename(url):
+    def useful_part(url):
+        return url.split('/')[-1].split('?')[0].split('#')[0]
+    if re.search(r'imgur\.com', url) and not re.search(r'i.imgur\.com', url):
+        return '{}.jpg'.format(
+            useful_part(url)
+        )
+    else:
+        return useful_part(url)
 
 def get_page(subreddit, page, after):
     url = TEMPLATE.format(subreddit, page, after)
@@ -45,13 +54,14 @@ def get_subreddit(subreddit, max_count, count=0, after=None):
 
 def download_children(children, encoding):
     def valid(child):
-        return True
+        exts = ('jpg', 'jpeg', 'png', 'gif')
+        return url_filename(child['data']['url']).split('.')[-1] in exts
 
     puts("Downloading children")
     jobs = []
     for child in filter(valid, children):
         url = child['data']['url']
-        filename = url.split('/')[-1].split('?')[0]
+        filename = url_filename(url)
         submission = Submission(
             url,
             filename,
@@ -61,25 +71,32 @@ def download_children(children, encoding):
         puts(u'Added {}'.format(filename).encode(encoding))
         jobs.append(gevent.spawn(download_submission, submission))
 
-    gevent.joinall(jobs, timeout=1)
+    gevent.joinall(jobs, timeout=10)
     for job in jobs:
         if not job.value:
             puts(colored.red('Timed out {}'.format(
                 job.args[0].filename.encode(encoding))))
 
 def download_submission(submission):
-    gevent.sleep(0.04*ord(os.urandom(1)))
+    gevent.sleep(0.01*ord(os.urandom(1)))
     puts(colored.green("DOWNLOADED ;) %s" % submission.filename.encode(submission.encoding)))
     return True
 
 
 def fix_subreddit_name(subreddit):
     # Get a fixed version of subreddit's name!
-    return subreddit
+    url = TEMPLATE.format(subreddit, '', '')
+    return json.loads(
+        requests.get(url).content)['data']['children'][0]['data']['subreddit']
+
 
 if __name__ == '__main__':
     for subreddit in subreddits:
-        subreddit = fix_subreddit_name(subreddit)
+        try:
+            subreddit = fix_subreddit_name(subreddit)
+        except:
+            puts(colored.red('Failed to load subreddit {}'.format(subreddit)))
+            continue
         quote = ' -> {} '.format(subreddit)
         with indent(len(quote), quote=quote):
             try:
