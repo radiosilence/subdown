@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
-
+import datetime
 from collections import namedtuple
 
 import simplejson as json
@@ -15,7 +15,9 @@ from gevent import monkey; monkey.patch_socket()
 subreddits = ['HistoryPorn',]
 max_count = 2
 
-TEMPLATE = 'http://reddit.com/r/{}/.json?count={}&after={}'
+TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
+
+Submission = namedtuple('Submission', 'url filename created')
 
 #url = 'http://localhost:{}'
 
@@ -24,6 +26,7 @@ def get_page(subreddit, page, after):
     url = TEMPLATE.format(subreddit, page, after)
     result = requests.get(url, timeout=2)
     puts('Getting page')
+    puts(url)
     try:
         if result.status_code != 200:
             raise Exception
@@ -45,10 +48,25 @@ def download_children(children, encoding):
         return True
 
     puts("Downloading children")
+    jobs = []
     for child in filter(valid, children):
         url = child['data']['url']
         filename = url.split('/')[-1].split('?')[0]
-        puts(u'Downloading {}'.format(filename).encode(encoding))
+        submission = Submission(
+            url,
+            filename,
+            datetime.datetime.fromtimestamp(child['data']['created'])
+        )
+        puts(u'Added {}'.format(filename).encode(encoding))
+        jobs.append(gevent.spawn(download_submission, submission))
+
+    gevent.joinall(jobs, timeout=10)
+    for job in jobs:
+        puts(job.value)
+
+def download_submission(submission):
+    return "DOWNLOADED ;) %s" % submission.created
+
 if __name__ == '__main__':
     for subreddit in subreddits:
         quote = ' -> {} '.format(subreddit)
@@ -56,6 +74,7 @@ if __name__ == '__main__':
             try:
                 get_subreddit(subreddit, max_count)
             except Exception as e:
+                raise
                 puts(colored.red(str(e)))
 
 # urls = [url.format(port) for port in [8051, 8052]]
