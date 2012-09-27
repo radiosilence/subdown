@@ -1,14 +1,14 @@
 """
-subdown.py
+subdown
 ----------
 
-subdown.py is a tool for downloading images from reddit.
+subdown is a tool for downloading images from reddit.
 """
 
 from setuptools import setup, find_packages
 
 setup(
-    name='subdown.py',
+    name='subdown',
     version='0.2',
     author='James Cleveland',
     author_email='jc@blackflags.co.uk',
