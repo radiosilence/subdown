@@ -4,18 +4,16 @@ subdown
 
 subdown is a tool for downloading images from reddit.
 """
-
-from setuptools import setup, find_packages
-from subdown import NAME, VERSION, AUTHOR, SHORT_DESC
+from setuptools import setup
 
 setup(
-    name=NAME,
-    version=VERSION,
-    author=AUTHOR,
+    name='subdown',
+    version='0.2',
+    author='James Cleveland',
     author_email='jc@blackflags.co.uk',
     url='https://github.com/radiosilence/subdown',
     license='LICENSE.txt',
-    description=SHORT_DESC,
+    description='Reddit image scraper',
     long_description=open('README.rst').read(),
     install_requires=open('requirements.txt').read().split("\n"),
     package_data={

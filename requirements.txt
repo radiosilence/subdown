@@ -2,3 +2,4 @@ clint>=0.3.1
 gevent>=0.13.8
 requests>=0.14.0
 simplejson>=2.6.2
+docopt>=0.5.0
