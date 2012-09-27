@@ -16,7 +16,7 @@ import gevent
 from gevent import monkey; monkey.patch_socket()
 
 subreddits = ['HistoryPorn', 'bondage']
-max_count = 2
+max_count = 20
 
 TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
 
@@ -48,7 +48,7 @@ def fix_url(url):
 
 def get_page(subreddit, count, after, max_count):
     url = TEMPLATE.format(subreddit, count, after)
-    result = requests.get(url, timeout=5)
+    result = requests.get(url, timeout=2)
     puts('{} {} (Page {} of {})'.format(colored.green('==>'), subreddit,
         count + 1, max_count))
     try:
@@ -113,11 +113,18 @@ def download_submission(s):
         return True
 
     puts('Adding {}'.format(path))
+    try:
+        r = requests.get(s.url, timeout=5)
+    except Exception as e:
+        puts(colored.red('Error: {} <{}>'.format(
+            path,
+            str(e)
+        )))
+        return True
 
-    r = requests.get(s.url, timeout=5)
     with open(path, 'w') as f:
         f.write(r.content)
-    puts('Downloaded {}'.format(s.filename))
+    puts('Downloaded {}'.format(path))
     set_utime(path, s.created)
     return True
 
