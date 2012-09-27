@@ -194,9 +194,11 @@ def subdown(args):
             raise
             puts(colored.red(str(e)))
 
-
-if __name__ == '__main__':
+def main():
     args = docopt(__doc__, version='{} {}'.format(
         NAME,
         VERSION))
     subdown(args)
+
+if __name__ == '__main__':
+    main()
