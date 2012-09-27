@@ -17,7 +17,7 @@ import gevent
 from gevent import monkey; monkey.patch_socket()
 
 NAME = 'subdown'
-VERSION = '0.2'
+VERSION = '0.2.1'
 AUTHOR = 'James Cleveland'
 SHORT_DESC = 'subreddit image scraper'
 
@@ -50,17 +50,10 @@ def useful_part(url):
     return url.split('/')[-1].split('?')[0].split('#')[0]
 
 
-def url_filename(url):
-    if re.search(r'imgur\.com', url) and not re.search(r'i.imgur\.com', url):
-        return '{}.jpg'.format(
-            useful_part(url)
-        )
-    else:
-        return useful_part(url)
-
-
 def fix_url(url):
-    if re.search(r'imgur\.com', url) and not re.search(r'i.imgur\.com', url):
+    is_imgur = re.search(r'imgur\.com', url)
+    is_file = re.search(r'\.(jpg|png|gif|jpeg)', url)
+    if is_imgur and not is_file :
         return 'http://i.imgur.com/{}.jpg'.format(
             useful_part(url)
         )
@@ -95,14 +88,15 @@ def get_page(subreddit, count, after, max_count, page_timeout):
 def download_children(subreddit, children, encoding, timeout, page_timeout):
     def valid(child):
         exts = ('jpg', 'jpeg', 'png', 'gif')
-        return url_filename(child['data']['url']).split('.')[-1] in exts
+        ext = useful_part(fix_url(child['data']['url'])).split('.')[-1]
+        return ext in exts
     jobs = []
     quote = '  {} '.format(colored.blue('->'))
 
     with indent(len(quote), quote=quote):
         for child in filter(valid, children):
-            url = child['data']['url']
-            filename = url_filename(url)
+            url = fix_url(child['data']['url'])
+            filename = useful_part(url)
             submission = Submission(
                 fix_url(url),
                 filename.encode(encoding),
