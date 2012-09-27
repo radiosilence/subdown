@@ -95,10 +95,6 @@ def download_children(children, encoding):
 
 
 def set_utime(path, created):
-    # puts('Setting modified time {} to {}'.format(
-    #     path,
-    #     created.strftime('%B %d %Y %I:%M%p')
-    # ))
     timestamp = time.mktime(created.timetuple())
     os.utime(path, (timestamp, timestamp))
 
