@@ -9,7 +9,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='subdown.py',
-    version='0.1',
+    version='0.2',
     author='James Cleveland',
     author_email='jc@blackflags.co.uk',
     packages=find_packages(),

@@ -12,7 +12,7 @@ import gevent
 from gevent import socket
 from gevent import monkey; monkey.patch_socket()
 
-subreddits = ['HistoryPorn',]
+subreddits = ['HistoryPorn', 'bondage']
 max_count = 2
 
 TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
@@ -72,8 +72,14 @@ def download_submission(submission):
     puts(colored.green("DOWNLOADED ;) %s" % submission.filename.encode(submission.encoding)))
     return True
 
+
+def fix_subreddit_name(subreddit):
+    # Get a fixed version of subreddit's name!
+    return subreddit
+
 if __name__ == '__main__':
     for subreddit in subreddits:
+        subreddit = fix_subreddit_name(subreddit)
         quote = ' -> {} '.format(subreddit)
         with indent(len(quote), quote=quote):
             try:
