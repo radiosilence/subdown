@@ -8,7 +8,7 @@ from setuptools import setup
 
 setup(
     name='subdown',
-    version='0.2.1',
+    version='0.2.2',
     author='James Cleveland',
     author_email='jc@blackflags.co.uk',
     url='https://github.com/radiosilence/subdown',

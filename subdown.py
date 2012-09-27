@@ -17,7 +17,7 @@ import gevent
 from gevent import monkey; monkey.patch_socket()
 
 NAME = 'subdown'
-VERSION = '0.2.1'
+VERSION = '0.2.2'
 AUTHOR = 'James Cleveland'
 SHORT_DESC = 'subreddit image scraper'
 
@@ -64,10 +64,15 @@ def fix_url(url):
 def get_subreddit(subreddit, max_count, timeout, page_timeout):
     count = 0
     after = None
+    prev_after = None
     while count < max_count:
         children, encoding, after = get_page(subreddit, count, after,
             max_count, page_timeout)
-        download_children(subreddit, children, encoding, timeout, page_timeout)
+        download_submissions(subreddit, children, encoding, timeout, page_timeout)
+        if prev_after == after:
+            puts('Subreddit exhausted')
+            break
+        prev_after = after
         count += 1
 
 
@@ -85,7 +90,7 @@ def get_page(subreddit, count, after, max_count, page_timeout):
     return data['children'], result.encoding, data['after']
 
 
-def download_children(subreddit, children, encoding, timeout, page_timeout):
+def download_submissions(subreddit, children, encoding, timeout, page_timeout):
     def valid(child):
         exts = ('jpg', 'jpeg', 'png', 'gif')
         ext = useful_part(fix_url(child['data']['url'])).split('.')[-1]
@@ -130,9 +135,13 @@ def download_submission(s, timeout):
         set_utime(path, s.created)
         return True
 
-    puts('Adding {}'.format(path))
+    puts('Added {}'.format(path))
     try:
         r = requests.get(s.url, timeout=timeout)
+        if r.status_code != 200:
+            raise Exception('Non-200 status code (image may not exist)')
+        if int(r.headers['content-length']) < (1024 * 5):
+            raise Exception('Image size less than 5KB, skipping')
     except Exception as e:
         puts(colored.red('Error: {} <{}>'.format(
             path,
