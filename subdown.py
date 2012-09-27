@@ -2,10 +2,13 @@
 # coding: utf-8
 import datetime
 import re
+import sys
 from collections import namedtuple
-import os, time
+import os
+import time
 import simplejson as json
 import requests
+import mimetypes
 
 from clint.textui import puts, indent, colored
 
@@ -17,12 +20,15 @@ max_count = 2
 
 TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
 
-Submission = namedtuple('Submission', 'url filename created encoding')
+Submission = namedtuple('Submission',
+    'url filename created subreddit')
+
+
+def useful_part(url):
+    return url.split('/')[-1].split('?')[0].split('#')[0]
 
 
 def url_filename(url):
-    def useful_part(url):
-        return url.split('/')[-1].split('?')[0].split('#')[0]
     if re.search(r'imgur\.com', url) and not re.search(r'i.imgur\.com', url):
         return '{}.jpg'.format(
             useful_part(url)
@@ -31,9 +37,18 @@ def url_filename(url):
         return useful_part(url)
 
 
+def fix_url(url):
+    if re.search(r'imgur\.com', url) and not re.search(r'i.imgur\.com', url):
+        return 'http://i.imgur.com/{}.jpg'.format(
+            useful_part(url)
+        )
+    else:
+        return url
+
+
 def get_page(subreddit, count, after, max_count):
     url = TEMPLATE.format(subreddit, count, after)
-    result = requests.get(url, timeout=2)
+    result = requests.get(url, timeout=5)
     puts('{} {} (Page {} of {})'.format(colored.green('==>'), subreddit,
         count + 1, max_count))
     try:
@@ -57,7 +72,6 @@ def download_children(children, encoding):
     def valid(child):
         exts = ('jpg', 'jpeg', 'png', 'gif')
         return url_filename(child['data']['url']).split('.')[-1] in exts
-
     jobs = []
     quote = '  {} '.format(colored.blue('->'))
     with indent(len(quote), quote=quote):
@@ -65,25 +79,50 @@ def download_children(children, encoding):
             url = child['data']['url']
             filename = url_filename(url)
             submission = Submission(
-                url,
-                filename,
+                fix_url(url),
+                filename.encode(encoding),
                 datetime.datetime.fromtimestamp(child['data']['created']),
-                encoding
+                subreddit
             )
             jobs.append(gevent.spawn(download_submission, submission))
 
-        gevent.joinall(jobs, timeout=2)
+        gevent.joinall(jobs, timeout=10)
         for job in jobs:
             if not job.value:
                 puts(colored.red('Timed out {}'.format(
-                    job.args[0].filename.encode(encoding))))
+                    job.args[0].filename)))
                 job.kill()
 
-def download_submission(submission):
-    gevent.sleep(0.01*ord(os.urandom(1)))
-    puts('Downloaded {}'.format(
-        submission.filename.encode(submission.encoding)
-    ))
+
+def set_utime(path, created):
+    # puts('Setting modified time {} to {}'.format(
+    #     path,
+    #     created.strftime('%B %d %Y %I:%M%p')
+    # ))
+    timestamp = time.mktime(created.timetuple())
+    os.utime(path, (timestamp, timestamp))
+
+
+def download_submission(s):
+    path = '{}/{}'.format(
+        s.subreddit,
+        s.filename
+    )
+    if not os.path.exists(s.subreddit):
+        os.mkdir(s.subreddit)
+
+    if os.path.exists(path):
+        puts('Skipping (exists) {}'.format(path))
+        set_utime(path, s.created)
+        return True
+
+    puts('Adding {}'.format(path))
+
+    r = requests.get(s.url, timeout=5)
+    with open(path, 'w') as f:
+        f.write(r.content)
+    puts('Downloaded {}'.format(s.filename))
+    set_utime(path, s.created)
     return True
 
 
