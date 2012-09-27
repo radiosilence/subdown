@@ -2,7 +2,7 @@
 # coding: utf-8
 import datetime
 from collections import namedtuple
-
+import os, time
 import simplejson as json
 import requests
 
@@ -17,7 +17,7 @@ max_count = 2
 
 TEMPLATE = 'http://www.reddit.com/r/{}/.json?count={}&after={}'
 
-Submission = namedtuple('Submission', 'url filename created')
+Submission = namedtuple('Submission', 'url filename created encoding')
 
 #url = 'http://localhost:{}'
 
@@ -55,17 +55,22 @@ def download_children(children, encoding):
         submission = Submission(
             url,
             filename,
-            datetime.datetime.fromtimestamp(child['data']['created'])
+            datetime.datetime.fromtimestamp(child['data']['created']),
+            encoding
         )
         puts(u'Added {}'.format(filename).encode(encoding))
         jobs.append(gevent.spawn(download_submission, submission))
 
-    gevent.joinall(jobs, timeout=10)
+    gevent.joinall(jobs, timeout=1)
     for job in jobs:
-        puts(job.value)
+        if not job.value:
+            puts(colored.red('Timed out {}'.format(
+                job.args[0].filename.encode(encoding))))
 
 def download_submission(submission):
-    return "DOWNLOADED ;) %s" % submission.created
+    gevent.sleep(0.04*ord(os.urandom(1)))
+    puts(colored.green("DOWNLOADED ;) %s" % submission.filename.encode(submission.encoding)))
+    return True
 
 if __name__ == '__main__':
     for subreddit in subreddits:
