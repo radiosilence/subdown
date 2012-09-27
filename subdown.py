@@ -88,7 +88,6 @@ def download_submission(submission):
 
 
 def fix_subreddit_name(subreddit):
-    # Get a fixed version of subreddit's name!
     url = TEMPLATE.format(subreddit, '', '')
     return json.loads(
         requests.get(url).content)['data']['children'][0]['data']['subreddit']
