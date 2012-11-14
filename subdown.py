@@ -6,7 +6,7 @@ import sys
 from collections import namedtuple
 import os
 import time
-import simplejson as json
+import omnijson as json
 import requests
 import mimetypes
 
