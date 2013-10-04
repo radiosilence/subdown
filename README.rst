@@ -1,5 +1,5 @@
-subdown.py
-==========
+subdown
+=======
 
 Simple tool to download image from subreddit(s).
 
