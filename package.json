@@ -1,0 +1,30 @@
+{
+  "name": "subdown",
+  "version": "0.0.1",
+  "description": "Subreddit image downloader.",
+  "main": "subdown.coffee",
+  "dependencies": {
+    "bluebird": "~0.7.9-1",
+    "async": "~0.2.9",
+    "kew": "~0.2.2",
+    "express": "~3.4.0",
+    "moment": "~2.2.1",
+    "pg": "~2.6.2",
+    "q": "~0.9.7"
+  },
+  "devDependencies": {
+    "bluebird": "~0.7.9-1"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/radiosilence/subdown/"
+  },
+  "keywords": [
+    "reddit"
+  ],
+  "author": "James Cleveland",
+  "license": "BSD-2-Clause"
+}
