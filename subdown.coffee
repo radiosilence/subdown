@@ -68,17 +68,15 @@ downloadImageSet = ([created, subreddit, images]) ->
         )
 
 testFile = (created, subreddit, url) ->
-    new Promise (resolve, reject) ->
-        filename = url.split("/")[-1..][0]
-        path = [subreddit, filename].join('/')
-        fs.existsAsync(path).then((exists) ->
-            if exists
-                reject("Already exists")
-        ).then(->
-            fs.mkdirAsync(subreddit).finally(->
-                resolve([created, url, path])
-            )
-        )
+    filename = url.split("/")[-1..][0]
+    path = [subreddit, filename].join('/')
+    return fs.existsAsync(path).then((exists) ->
+        if exists
+            throw new Error("Already exists")
+        fs.mkdirAsync(subreddit).catch(->)
+    ).then(->
+        [created, url, path]
+    )
 
 
 downloadImage = ([created, url, path]) ->
