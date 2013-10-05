@@ -103,17 +103,19 @@ writeFile = (path, response) ->
     new Promise (resolve, reject) ->
         response.on 'error', (err) ->
             reject err
-        fs.open path, 'w', (err, fd) ->
-            if err
-                reject err
+        fs.openAsync(path, 'w').then((fd) ->
             response.on 'data', (chunk) ->
-                fs.write fd, chunk, 0, chunk.length, null, (err, written) ->
-                    if err
-                        reject err
+                fs.writeAsync(
+                    fd, chunk, 0, chunk.length, null
+                ).catch((err) ->
+                    reject err
+                )
             response.on 'end', ->
-                fs.close fd, ->
+                fs.closeAsync(fd).then(->
                     console.log "Saved #{path}"
                     resolve()
+                )
+        ).catch(reject)
 
 setUpdatedTime = ([created, path]) ->
     # console.log "Set #{created} on #{path}"
