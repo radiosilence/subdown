@@ -68,23 +68,18 @@ downloadImageSet = ([created, subreddit, images]) ->
         )
 
 testFile = (created, subreddit, url) ->
-    console.log "Testing #{subreddit} #{url}"
     new Promise (resolve, reject) ->
         filename = url.split("/")[-1..][0]
         path = [subreddit, filename].join('/')
-        fs.exists path, (exists) ->
+        fs.existsAsync(path).then((exists) ->
             if exists
                 reject("Already exists")
-            else
-                quietMakeDir(subreddit).then(->
-                    resolve([created, url, path])
-                )
-
-quietMakeDir = (dir) ->
-    new Promise (resolve, reject) ->
-        fs.mkdir(dir, ->
-            resolve()
+        ).then(->
+            fs.mkdirAsync(subreddit).finally(->
+                resolve([created, url, path])
+            )
         )
+
 
 downloadImage = ([created, url, path]) ->
     new Promise (resolve, reject) ->
