@@ -1,6 +1,14 @@
 Promise = require 'bluebird'
 http = require 'http'
 fs = Promise.promisify(require 'fs')
+colors = require 'colors'
+log = require 'npmlog'
+
+
+log.heading = 'subdown'
+
+ImageAlreadyExistsError = ->
+ImageAlreadyExistsError.prototype = new Error()
 
 getSubreddit = (subreddit, pages, page, after) ->
     after = after or undefined
@@ -16,7 +24,6 @@ getSubreddit = (subreddit, pages, page, after) ->
     )
 
 getPage = (subreddit, page, after) ->
-    console.log "Getting #{page}:#{after} of #{subreddit}"
     new Promise (resolve, reject) ->
         options = 
             host: 'www.reddit.com'
@@ -28,6 +35,7 @@ getPage = (subreddit, page, after) ->
                 str += chunk
 
             response.on 'end', ->
+                log.info subreddit, "Got page #{page}"
                 data = (JSON.parse str).data
                 after = data.after
                 submissions = data.children
@@ -63,16 +71,19 @@ downloadImageSet = ([created, subreddit, images]) ->
             downloadImage
         ).then(
             setUpdatedTime
-        ).catch((err) ->
-            console.log "Error with image #{url}: #{err}"
+        ).then(->
+            log.info subreddit, "Downloaded #{url}"
+        ).catch(ImageAlreadyExistsError, (err) ->
+        ).catch(Error, (err) ->
+            log.error subreddit, url, err
         )
 
 testFile = (created, subreddit, url) ->
     filename = url.split("/")[-1..][0]
     path = [subreddit, filename].join('/')
-    return fs.existsAsync(path).then((exists) ->
-        if exists
-            throw new Error("Already exists")
+    fs.existsAsync(path).catch(->
+        throw new ImageAlreadyExistsError('exists')
+    ).then(->
         fs.mkdirAsync(subreddit).catch(->)
     ).then(->
         [created, url, path]
@@ -110,7 +121,6 @@ writeFile = (path, response) ->
                 )
             response.on 'end', ->
                 fs.closeAsync(fd).then(->
-                    console.log "Saved #{path}"
                     resolve()
                 )
         ).catch(reject)

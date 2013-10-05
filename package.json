@@ -4,17 +4,10 @@
   "description": "Subreddit image downloader.",
   "main": "subdown.coffee",
   "dependencies": {
-    "bluebird": "~0.7.9-1",
-    "async": "~0.2.9",
-    "kew": "~0.2.2",
-    "express": "~3.4.0",
-    "moment": "~2.2.1",
-    "pg": "~2.6.2",
-    "q": "~0.9.7"
-  },
-  "devDependencies": {
-    "bluebird": "~0.7.9-1",
-    "coffee-script": "~1.6.3"
+    "bluebird": "~0.7.10-0",
+    "colors": "~0.6.2",
+    "coffee-script": "~1.6.3",
+    "npmlog": "0.0.4"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
