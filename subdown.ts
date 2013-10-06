@@ -1,4 +1,3 @@
-var require = require || function () {};
 var Promise = require('bluebird'),
     http = Promise.promisify(require('http')),
     fs = Promise.promisify(require('fs')),
@@ -31,21 +30,23 @@ class Subreddit {
                     this.downloadImageSets
                 );
             }
-        ).catch(MaxPagesReachedError, function(){});
+        ).catch(MaxPagesReachedError, function(){
+            log.info(this.name, "Max pages reached.");
+        });
     }
     getPage(): Promise {
         return new Promise(function(resolve, reject) {
-            var options = {
+            var options: {'host': string; 'path': string; } = {
                 'host': 'www.reddit.com',
                 'path': ['/r/', this.name, '/.json/?page=', this.currentPage, '&after=', this.currentAfter].join('')
             };
-            http.getAsync(options).then(function(reponse) {
+            http.request(options).then(function(res) {
                 var str: string = '';
-                response.on('data', function(chunk) {
+                res.on('data', function(chunk) {
                     str += chunk;
                 });
-                response.on('end', function() {
-                    log.info(this.name, "Got page", self.currentPage);
+                res.on('end', function() {
+                    log.info(this.name, "Got page", this.currentPage);
                     var data = JSON.parse(str).data,
                         submissions = data.submissions;
                     this.currentAfter = data.after;
@@ -53,7 +54,7 @@ class Subreddit {
                     this.name = data.subreddit;
                     resolve(submissions);
                 });
-            })
+            }).end();
         });
     }
     processSubmissions(submissions: Submission[]): Promise {
@@ -136,7 +137,7 @@ class ImageURL {
     }
     save(): Promise {
         var parts: string[] = this.url.split('/'),
-            options = {
+            options: {'host': string; 'path': string;} = {
                 'host': parts[2],
                 'path': "/" + parts.slice(3).join('/')
             };
