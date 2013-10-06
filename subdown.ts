@@ -152,7 +152,7 @@ class ImageURL {
                 res.on('end', function() {
                     fs.closeAsync(fd);
                 })
-            }).end()
+            }).end();
         });
     }
     setUpdatedTime(): void {
